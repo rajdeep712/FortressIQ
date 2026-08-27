@@ -153,14 +153,13 @@ def detect_mime_type(file_path: Path) -> str:
 
 
 def check_mime_type(
-    file_path: Path,
+    detected_mime: str,
     extension: str,
 ) -> bool:
     """
     Check if the detected MIME type matches
     what we expect for this file type.
     """
-    detected_mime = detect_mime_type(file_path)
     allowed_mimes = EXPECTED_MIME_TYPES.get(extension, set())
 
     return detected_mime in allowed_mimes

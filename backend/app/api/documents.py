@@ -16,15 +16,15 @@ router = APIRouter(
 )
 
 
-@router.post(
+@router.post(   ## Final URL with the prefix becomes -> POST /api/v1/documents/upload
     "/upload",
     response_model=DocumentUploadResponse,
 )
 async def upload_document(
     file: UploadFile = File(...),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db),   ## using Depends automatically calls get_db and injects it here.(which creates the session and provides it to the function).
 ):
-    user_id = settings.mock_user_id
+    user_id = settings.mock_user_id   ## For now we are using mock user id.
 
     repository = DocumentRepository(db)
     malware_scanner = MalwareScanner()

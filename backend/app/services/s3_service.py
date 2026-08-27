@@ -10,9 +10,8 @@ logger = logging.getLogger(__name__)
 
 
 class S3Service:
-
     def __init__(self):
-        self.client = boto3.client(
+        self.client = boto3.client(   ## AWS S3 Client.
             "s3",
             region_name=settings.aws_region,
             aws_access_key_id=settings.aws_access_key_id,
@@ -22,11 +21,10 @@ class S3Service:
 
     def upload_file(
         self,
-        file_path: Path,
-        s3_key: str,
-        content_type: str,
+        file_path: Path,   ## path where the file is temporarily stored in disk.
+        s3_key: str,   ## For storing key in S3.
+        content_type: str,   ## Mime Type
     ) -> None:
-
         extra_args = {
             "ContentType": content_type,
             "ServerSideEncryption": "aws:kms",
@@ -40,7 +38,7 @@ class S3Service:
                 s3_key,
                 ExtraArgs=extra_args,
             )
-        except ClientError as exc:
+        except ClientError as exc:  ## For handling errors during upload.
             logger.error(
                 "S3 upload failed for key=%s: %s",
                 s3_key,

@@ -34,8 +34,8 @@ class DocumentService:
         s3_service: S3Service,
         malware_scanner: MalwareScanner,
     ):
-        self.repository = repository
-        self.s3 = s3_service
+        self.repository = repository   ## Database
+        self.s3 = s3_service     ## S3
         self.malware_scanner = malware_scanner
 
     async def upload_document(

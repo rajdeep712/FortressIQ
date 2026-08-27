@@ -1,12 +1,11 @@
-from sqlalchemy import select
+from sqlalchemy import select  
 from sqlalchemy.orm import Session
 
 from app.models.document import Document
 
 
 class DocumentRepository:
-
-    def __init__(self, db: Session):
+    def __init__(self, db: Session):  ## Connects to the database using SQLAlchemy.
         self.db = db
 
     def find_by_hash(
@@ -29,8 +28,8 @@ class DocumentRepository:
         document: Document,
     ) -> Document:
 
-        self.db.add(document)
-        self.db.commit()
-        self.db.refresh(document)
+        self.db.add(document)   ## This tells "I want to insert this document."
+        self.db.commit()   ## This actually commits the transaction to the database.
+        self.db.refresh(document)  ## This reloads the document from the database.
 
         return document

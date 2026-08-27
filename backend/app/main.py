@@ -1,4 +1,4 @@
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager   ## manages startup/shutdown behavior.
 
 from fastapi import FastAPI
 

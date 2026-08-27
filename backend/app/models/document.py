@@ -14,13 +14,12 @@ from sqlalchemy.orm import (
     mapped_column,
 )
 
-
+## Base is the parent class for all your database models.
 class Base(DeclarativeBase):
     pass
 
-
+## Defines the 'documents' table in your database.
 class Document(Base):
-
     __tablename__ = "documents"
 
     id: Mapped[int] = mapped_column(
@@ -81,7 +80,7 @@ class Document(Base):
         String(50),
         nullable=False,
         default="UPLOADED",
-    )
+    )  ## PROCESSING, PARSED, CHUNKED, EMBEDDED, COMPLETED, FAILED
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
