@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     gemini_embedding_task_type: str = "RETRIEVAL_DOCUMENT"
     gemini_embedding_batch_size: int = 100
 
+    # Chunking
+    chunk_child_max_chars: int = 2000
+    chunk_parent_soft_max_chars: int = 7500
+    chunk_parent_max_chars: int = 20000
+
     # Database
     database_url: str = "sqlite:///./documents.db"
 

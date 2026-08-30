@@ -1,8 +1,6 @@
 from pathlib import Path
 
-from app.ingestion.chunker import (
-    HierarchicalChunker,
-)
+from app.ingestion.chunker import chunk_document
 from app.ingestion.embedding import (
     EmbeddingService,
 )
@@ -18,13 +16,10 @@ class IngestionPipeline:
 
     def __init__(
         self,
-        chunker: HierarchicalChunker,
         embedding_service: EmbeddingService,
         chunk_repository: ChunkRepository,
         qdrant_service: QdrantService,
     ):
-
-        self.chunker = chunker
 
         self.embedding = (
             embedding_service
@@ -61,12 +56,10 @@ class IngestionPipeline:
         )
 
         # -----------------------------------------
-        # 2. Hierarchical chunking
+        # 2. Per-type hierarchical chunking
         # -----------------------------------------
 
-        chunks = self.chunker.chunk(
-            document
-        )
+        chunks = chunk_document(document)
 
         # -----------------------------------------
         # 3. Store chunk metadata

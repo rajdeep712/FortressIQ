@@ -22,3 +22,4 @@ beautifulsoup4
 pymupdf
 
 google-genai
+qdrant-client
