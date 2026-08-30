@@ -19,6 +19,25 @@ class Settings(BaseSettings):
     s3_bucket_name: str
     kms_key_arn: str
 
+    # OpenDocumentLoader API
+    odl_api_endpoint: str = ""
+    odl_timeout_seconds: int = 300
+
+    # Docling API
+    docling_api_endpoint: str = ""
+    docling_api_key: str = ""
+    docling_timeout_seconds: int = 600
+
+    # LibreOffice (DOCX -> PDF)
+    libreoffice_path: str = "soffice"
+
+    # Gemini Embeddings
+    gemini_api_key: str = ""
+    gemini_embedding_model: str = "gemini-embedding-001"
+    gemini_embedding_output_dimension: int = 768
+    gemini_embedding_task_type: str = "RETRIEVAL_DOCUMENT"
+    gemini_embedding_batch_size: int = 100
+
     # Database
     database_url: str = "sqlite:///./documents.db"
 

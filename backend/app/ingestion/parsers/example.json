@@ -1,0 +1,47 @@
+{
+    "1": {
+        "userId": 28401,
+        "username": "dev_alex",
+        "isActive": true,
+        "profile": {
+            "firstName": "Alex",
+            "lastName": "Rivera",
+            "email": "alex@example.com"
+        },
+        "skills": [
+            "JavaScript",
+            "Python",
+            "SQL"
+        ]
+    },
+    "2": {
+        "userId": 28402,
+        "username": "dev_alex",
+        "isActive": true,
+        "profile": {
+            "firstName": "Alex",
+            "lastName": "Rivera",
+            "email": "alex@example.com"
+        },
+        "skills": [
+            "JavaScript",
+            "Python",
+            "SQL"
+        ]
+    },
+    "3": {
+        "userId": 28403,
+        "username": "dev_alex",
+        "isActive": true,
+        "profile": {
+            "firstName": "Alex",
+            "lastName": "Rivera",
+            "email": "alex@example.com"
+        },
+        "skills": [
+            "JavaScript",
+            "Python",
+            "SQL"
+        ]
+    }
+}

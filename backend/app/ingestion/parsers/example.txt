@@ -1,0 +1,14 @@
+Title: Sample Text Document
+Author: John Doe
+Date: August 29, 2026
+
+This is a simple plain text file. 
+It contains unformatted text, meaning there are no bold words, italic styles, or custom fonts. 
+You can use a text file for taking notes, storing simple lists, or writing computer code.
+
+List of items:
+- Item one: Apples
+- Item two: Bananas
+- Item three: Oranges
+
+End of file.
