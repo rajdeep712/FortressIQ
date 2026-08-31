@@ -13,3 +13,18 @@ class DocumentUploadResponse(BaseModel):
     s3_key: str
     status: str
     created_at: datetime
+
+
+class DocumentStatusResponse(BaseModel):
+    doc_id: str
+    filename: str
+    status: str
+    chunk_count: int
+    s3_key: str
+    created_at: datetime
+
+
+class DocumentRetryResponse(BaseModel):
+    doc_id: str
+    status: str
+    message: str

@@ -45,3 +45,21 @@ class S3Service:
                 exc,
             )
             raise
+
+    def get_object(
+        self,
+        s3_key: str,
+    ) -> bytes:
+        try:
+            response = self.client.get_object(
+                Bucket=self.bucket,
+                Key=s3_key,
+            )
+            return response["Body"].read()
+        except ClientError as exc:
+            logger.error(
+                "S3 get failed for key=%s: %s",
+                s3_key,
+                exc,
+            )
+            raise

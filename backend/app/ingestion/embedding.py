@@ -1,54 +1,67 @@
-from google import genai
-from google.genai import types
+import logging
+import os
 
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
 
-class EmbeddingService:
+# huggingface_hub snapshots HF_* settings into module constants at import
+# time, so the offline/telemetry flags must be in os.environ BEFORE
+# sentence_transformers (and its huggingface_hub dependency) is imported
+# below. Otherwise the worker pings the hub at every startup.
+if settings.hf_hub_offline:
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+
+from sentence_transformers import SentenceTransformer  # noqa: E402
+
+EMBEDDER_SENTENCE_TRANSFORMER = "sentence-transformer"
+
+
+class SentenceTransformerEmbeddingService:
+
+    provider = EMBEDDER_SENTENCE_TRANSFORMER
 
     def __init__(
         self,
         model_name: str | None = None,
-        api_key: str | None = None,
-        output_dimension: int | None = None,
-        task_type: str | None = None,
         batch_size: int | None = None,
+        normalize_embeddings: bool = True,
+        model=None,
     ):
-
         self.model_name = (
-            model_name
-            or settings.gemini_embedding_model
+            settings.embedding_model
+            if model_name is None
+            else model_name
         )
+        self.batch_size = (
+            settings.embedding_batch_size
+            if batch_size is None
+            else batch_size
+        )
+        self.normalize_embeddings = normalize_embeddings
 
-        self.api_key = (
-            api_key
-            or settings.gemini_api_key
+        self.model = (
+            model
+            if model is not None
+            else SentenceTransformer(self.model_name)
         )
 
         self.output_dimension = (
-            output_dimension
-            or settings.gemini_embedding_output_dimension
+            self.model.get_sentence_embedding_dimension()
         )
 
-        self.task_type = (
-            task_type
-            or settings.gemini_embedding_task_type
-        )
-
-        self.batch_size = (
-            batch_size
-            or settings.gemini_embedding_batch_size
-        )
-
-        if not self.api_key:
-
+        if self.output_dimension != settings.embedding_dimension:
             raise ValueError(
-                "GEMINI_API_KEY is not configured."
+                f"Model {self.model_name} dimension "
+                f"({self.output_dimension}) does not match "
+                "EMBEDDING_DIMENSION "
+                f"({settings.embedding_dimension})."
             )
 
-        self.client = genai.Client(
-            api_key=self.api_key
-        )
+    @property
+    def dimension(self) -> int:
+        return self.output_dimension
 
     def embed(
         self,
@@ -56,42 +69,53 @@ class EmbeddingService:
     ) -> list[list[float]]:
 
         if not texts:
-
             return []
 
-        vectors: list[list[float]] = []
+        embeddings = self.model.encode(
+            texts,
+            batch_size=self.batch_size,
+            normalize_embeddings=self.normalize_embeddings,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
 
-        for start in range(
-            0,
-            len(texts),
-            self.batch_size,
-        ):
+        return [
+            list(float(value) for value in vector)
+            for vector in embeddings
+        ]
 
-            batch = texts[
-                start : start + self.batch_size
-            ]
 
-            response = self.client.models.embed_content(
-                model=self.model_name,
-                contents=batch,
-                config=types.EmbedContentConfig(
-                    task_type=self.task_type,
-                    output_dimensionality=self.output_dimension,
-                ),
+class EmbeddingService:
+
+    def __init__(self, service=None):
+        self._service = (
+            service or SentenceTransformerEmbeddingService()
+        )
+
+        if self._service.dimension != settings.embedding_dimension:
+            raise ValueError(
+                f"Embedding dimension ({self._service.dimension}) "
+                "does not match EMBEDDING_DIMENSION "
+                f"({settings.embedding_dimension})."
             )
 
-            for embedding in response.embeddings:
-
-                vectors.append(
-                    list(
-                        float(value)
-                        for value in embedding.values
-                    )
-                )
-
-        return vectors
+        self.last_provider: str | None = None
 
     @property
     def dimension(self) -> int:
+        return self._service.dimension
 
-        return self.output_dimension
+    def embed(
+        self,
+        texts: list[str],
+    ) -> list[list[float]]:
+
+        if not texts:
+            self.last_provider = None
+            return []
+
+        vectors = self._service.embed(texts)
+
+        self.last_provider = self._service.provider
+
+        return vectors

@@ -81,7 +81,8 @@ class DocumentChunk(Base):
         default=list,
     )
 
-    metadata: Mapped[dict] = mapped_column(
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
         JSON,
         default=dict,
     )

@@ -11,6 +11,7 @@ the exact document position is available for provenance/citation.
 # Fields promoted from Chunk.metadata to top-level payload keys so the
 # vector store can index and filter on them.
 FILTER_FIELDS = (
+    "embedder",
     "section_path",
     "mime_type",
     "strategy",

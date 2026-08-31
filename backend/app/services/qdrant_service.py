@@ -1,3 +1,9 @@
+import logging
+import re
+import time
+import uuid
+
+import httpx
 from qdrant_client import (
     QdrantClient,
     models,
@@ -5,6 +11,32 @@ from qdrant_client import (
 
 from app.ingestion.payload import (
     build_payload,
+)
+
+logger = logging.getLogger(__name__)
+
+# Chunk ids look like `child_<32 hex>` / `parent_<32 hex>`
+# (app/ingestion/chunker/base.py). Qdrant does not accept those as point
+# ids: it only accepts unsigned integers or UUIDs. Derive a dashed UUID
+# from the chunk id deterministically so re-upserts/re-ingests keep the
+# exact same point id for a given chunk.
+_HEX32 = re.compile(r"^[0-9a-fA-F]{32}$")
+
+
+def qdrant_point_id(chunk_id: str) -> str:
+    suffix = chunk_id.rsplit("_", 1)[-1]
+    if _HEX32.match(suffix):
+        return str(uuid.UUID(suffix))
+    return str(uuid.uuid5(uuid.NAMESPACE_OID, chunk_id))
+
+
+# Retryable client/network conditions (e.g. Qdrant Cloud read timeouts).
+# Everything else -- validation 4xx, unexpected responses -- is permanent
+# and must fail the batch immediately.
+TRANSIENT_UPSERT_ERRORS = (
+    httpx.TransportError,
+    httpx.TimeoutException,
+    ConnectionError,
 )
 
 
@@ -15,13 +47,21 @@ class QdrantService:
         collection_name: str,
         vector_size: int,
         api_key: str | None = None,
+        timeout_seconds: int = 120,
+        upsert_batch_size: int = 100,
+        upsert_max_retries: int = 2,
+        upsert_retry_delay_seconds: float = 1.0,
     ):
 
         self.collection_name = collection_name
+        self.upsert_batch_size = upsert_batch_size
+        self.upsert_max_retries = upsert_max_retries
+        self.upsert_retry_delay_seconds = upsert_retry_delay_seconds
 
         self.client = QdrantClient(
             url=url,
             api_key=api_key,
+            timeout=timeout_seconds,
         )
 
         self._ensure_collection(
@@ -63,6 +103,7 @@ class QdrantService:
         ("parser", models.PayloadSchemaType.KEYWORD),
         ("mime_type", models.PayloadSchemaType.KEYWORD),
         ("strategy", models.PayloadSchemaType.KEYWORD),
+        ("embedder", models.PayloadSchemaType.KEYWORD),
         ("section_path", models.PayloadSchemaType.KEYWORD),
         # Document structure / location
         ("root", models.PayloadSchemaType.KEYWORD),
@@ -130,6 +171,27 @@ class QdrantService:
                 if "text" not in payload_schema:
                     raise
 
+    def delete_chunks_by_doc(
+        self,
+        doc_id: str,
+    ) -> None:
+        self.client.delete(
+            collection_name=self.collection_name,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="doc_id",
+                            match=models.MatchValue(
+                                value=doc_id
+                            ),
+                        )
+                    ]
+                )
+            ),
+            wait=True,
+        )
+
     def upsert_chunks(
         self,
         chunks,
@@ -151,14 +213,53 @@ class QdrantService:
 
             points.append(
                 models.PointStruct(
-                    id=chunk.chunk_id,
+                    id=qdrant_point_id(chunk.chunk_id),
                     vector=vector,
                     payload=build_payload(chunk),
                 )
             )
 
-        return self.client.upsert(
-            collection_name=self.collection_name,
-            points=points,
-            wait=True,
-        )
+        # Qdrant Cloud is sensitive to single large upsert requests: a
+        # whole document in one wait=True call can exceed the HTTP read
+        # timeout. Send points in bounded batches so each request stays
+        # small, and retry a batch before giving up (upserts are
+        # idempotent per point id, so retrying a batch is safe).
+        results = []
+        for start in range(
+            0,
+            len(points),
+            self.upsert_batch_size,
+        ):
+            batch = points[
+                start:start + self.upsert_batch_size
+            ]
+            for attempt in range(self.upsert_max_retries + 1):
+                try:
+                    result = self.client.upsert(
+                        collection_name=self.collection_name,
+                        points=batch,
+                        wait=True,
+                    )
+                    results.append(result)
+                    break
+                except TRANSIENT_UPSERT_ERRORS:
+                    if (
+                        attempt
+                        >= self.upsert_max_retries
+                    ):
+                        raise
+                    delay = min(
+                        self.upsert_retry_delay_seconds
+                        * (2**attempt),
+                        10,
+                    )
+                    logger.warning(
+                        "Qdrant upsert of %d points failed "
+                        "(attempt %d); retrying in %.1fs",
+                        len(batch),
+                        attempt + 1,
+                        delay,
+                    )
+                    time.sleep(delay)
+
+        return results

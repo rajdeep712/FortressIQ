@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, delete, func
 
 from app.models.chunk import DocumentChunk
 from app.ingestion.chunker import Chunk
@@ -40,7 +40,7 @@ class ChunkRepository:
                         for location
                         in chunk.locations
                     ],
-                    metadata=chunk.metadata,
+                    metadata_json=chunk.metadata,
                 )
             )
 
@@ -65,11 +65,37 @@ class ChunkRepository:
             statement
         ).scalar_one_or_none()
 
-
-def get_parent(
+    def get_parent(
         self,
         parent_chunk_id: str,
     ):
         return self.get_chunk(
             parent_chunk_id
+        )
+
+    def delete_by_doc(
+        self,
+        doc_id: str,
+    ) -> int:
+        result = self.db.execute(
+            delete(DocumentChunk).where(
+                DocumentChunk.doc_id == doc_id
+            )
+        )
+        self.db.commit()
+        return result.rowcount
+
+    def count_by_doc(
+        self,
+        doc_id: str,
+    ) -> int:
+        return (
+            self.db.scalar(
+                select(func.count()).select_from(
+                    DocumentChunk
+                ).where(
+                    DocumentChunk.doc_id == doc_id
+                )
+            )
+            or 0
         )

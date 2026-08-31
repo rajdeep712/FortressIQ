@@ -16,6 +16,11 @@ python-magic-bin==0.4.14; platform_system == "Windows"
 
 python-dotenv==1.1.0
 
+# Auth
+pyjwt[crypto]
+bcrypt
+email-validator
+
 pytest==8.3.2
 openpyxl==3.1.5
 beautifulsoup4
@@ -23,3 +28,9 @@ pymupdf
 
 google-genai
 qdrant-client
+arq
+redis
+
+# Local embeddings (torch CPU):
+# pip install --index-url https://download.pytorch.org/whl/cpu torch
+sentence-transformers
