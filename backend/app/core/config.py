@@ -8,15 +8,23 @@ class Settings(BaseSettings):
 
     # Auth
     jwt_secret_key: str
-    access_token_expire_minutes: int = 1440
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 30
     verification_token_expire_hours: int = 24
+    password_reset_token_expire_minutes: int = 30
     resend_api_key: str = ""
     resend_from_email: str = ""
     google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = ""
     frontend_url: str = "http://localhost:3000"
     cors_origins: str = "http://localhost:3000"
+    # Fallback avatar for accounts without their own (e.g. email/password).
+    default_avatar_url: str = (
+        "https://www.gravatar.com/avatar/"
+        "00000000000000000000000000000000?d=mp&f=y"
+    )
 
-    # Mock authentication for now
     # Upload limits
     max_file_size_mb: int = 50
 
