@@ -72,6 +72,13 @@ def make_user(db, email="a@b.com", password="password123"):
     ).register(email=email, password=password)[0]
 
 
+def make_verified_user(db, email="a@b.com", password="password123"):
+    """Register an email account and mark it verified so login succeeds."""
+    user = make_user(db, email=email, password=password)
+    user.is_verified = True
+    return UserRepository(db).update(user)
+
+
 def set_send_verification(mp, sent=None):
     sent = sent if sent is not None else []
 
@@ -160,15 +167,53 @@ def test_register_duplicate_email_409(client, db_session):
     assert response.status_code == 409
 
 
-def test_register_short_password_422(client):
+def test_register_short_password_400(client):
     response = client.post(
         "/api/v1/auth/register",
         json={
             "email": "short@example.com",
             "password": "abc",
+            "full_name": "Short Password",
         },
     )
-    assert response.status_code == 422
+    assert response.status_code == 400
+    assert "Invalid value for" in response.json()["detail"]
+    assert "password" in response.json()["detail"].lower()
+
+
+def test_register_missing_parameters_400(client):
+    response = client.post(
+        "/api/v1/auth/register",
+        json={"email": "new@example.com"},
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "Missing required parameter" in detail
+    for field in ("password", "full_name"):
+        assert field in detail
+
+
+def test_login_missing_parameters_400(client):
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "a@b.com"},
+    )
+    assert response.status_code == 400
+    assert "Missing required parameter" in response.json()["detail"]
+    assert "password" in response.json()["detail"]
+
+
+def test_register_invalid_email_400(client):
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "not-an-email",
+            "password": "password123",
+            "full_name": "X",
+        },
+    )
+    assert response.status_code == 400
+    assert "Invalid value for" in response.json()["detail"]
 
 
 # ---------------------------------------------------------------
@@ -177,7 +222,7 @@ def test_register_short_password_422(client):
 
 
 def test_login_success_sets_cookies(client, db_session):
-    make_user(db_session())
+    make_verified_user(db_session())
     response = client.post(
         "/api/v1/auth/login",
         json={"email": "a@b.com", "password": "password123"},
@@ -194,7 +239,7 @@ def test_login_success_sets_cookies(client, db_session):
 
 
 def test_login_wrong_password_401(client, db_session):
-    make_user(db_session())
+    make_verified_user(db_session())
     response = client.post(
         "/api/v1/auth/login",
         json={"email": "a@b.com", "password": "wrong password"},
@@ -208,6 +253,29 @@ def test_login_unknown_email_401(client):
         json={"email": "nobody@example.com", "password": "password123"},
     )
     assert response.status_code == 401
+
+
+def test_login_unverified_email_403(client, db_session):
+    # make_user registers an account but leaves it unverified.
+    make_user(db_session())
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "a@b.com", "password": "password123"},
+    )
+    assert response.status_code == 403
+    assert "verify your email" in response.json()["detail"].lower()
+    assert ACCESS_COOKIE not in response.cookies
+    assert REFRESH_COOKIE not in response.cookies
+
+
+def test_login_verified_email_succeeds(client, db_session):
+    make_verified_user(db_session())
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "a@b.com", "password": "password123"},
+    )
+    assert response.status_code == 200
+    assert response.json()["user"]["is_verified"] is True
 
 
 # ---------------------------------------------------------------
@@ -439,7 +507,7 @@ def test_forgot_password_unknown_email_does_not_leak(client, monkeypatch):
 def test_reset_password_changes_password_and_revokes_sessions(
     client, db_session, monkeypatch
 ):
-    make_user(db_session(), email="rp@example.com")
+    make_verified_user(db_session(), email="rp@example.com")
     # Log in to obtain a session that should be revoked on reset.
     login = client.post(
         "/api/v1/auth/login",
@@ -530,7 +598,7 @@ def _register(client, email="rot@example.com", **extra):
 
 
 def test_login_sets_auth_cookies(client, db_session):
-    make_user(db_session())
+    make_verified_user(db_session())
     resp = client.post(
         "/api/v1/auth/login",
         json={"email": "a@b.com", "password": "password123"},
@@ -654,12 +722,14 @@ def test_sessions_requires_auth(client):
 # ---------------------------------------------------------------
 
 
-def test_register_requires_name_422(client):
+def test_register_requires_name_400(client):
     response = client.post(
         "/api/v1/auth/register",
         json={"email": "noname@example.com", "password": "password123"},
     )
-    assert response.status_code == 422
+    assert response.status_code == 400
+    assert "Missing required parameter" in response.json()["detail"]
+    assert "full_name" in response.json()["detail"]
 
 
 def test_email_user_gets_default_avatar(client, db_session):

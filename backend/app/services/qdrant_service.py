@@ -41,6 +41,9 @@ TRANSIENT_UPSERT_ERRORS = (
 
 
 class QdrantService:
+    # The named sparse vector (BM25) used for hybrid dense+sparse search.
+    SPARSE_VECTOR_NAME = "bm25"
+
     def __init__(
         self,
         url: str,
@@ -82,9 +85,48 @@ class QdrantService:
                     size=vector_size,
                     distance=models.Distance.COSINE,
                 ),
+                sparse_vectors_config={
+                    self.SPARSE_VECTOR_NAME: (
+                        models.SparseVectorParams()
+                    )
+                },
             )
+        else:
+            self._ensure_sparse_config()
 
         self._create_payload_indexes()
+
+    def _ensure_sparse_config(self):
+        """Idempotently add the named sparse vector config to an existing
+        (previously dense-only) collection so hybrid search can use it.
+        Additive and safe to run on every init; does nothing if present."""
+        try:
+            info = self.client.get_collection(
+                self.collection_name
+            )
+            sparse = getattr(
+                info.config.params,
+                "sparse_vectors",
+                None,
+            ) or {}
+        except Exception:  # noqa: BLE001
+            return
+
+        if self.SPARSE_VECTOR_NAME in sparse:
+            return
+
+        # Qdrant cannot add a brand-new named vector via update_collection
+        # (PATCH); that endpoint only alters existing vector configs.
+        # Adding a sparse vector post-creation must go through the dedicated
+        # named-vector endpoint (Qdrant >= 1.18), which the sdk exposes as
+        # create_vector_name.
+        self.client.create_vector_name(
+            collection_name=self.collection_name,
+            vector_name=self.SPARSE_VECTOR_NAME,
+            vector_name_config=models.SparseVectorNameConfig(
+                sparse=models.SparseVectorConfig(),
+            ),
+        )
 
     # Payload fields the app filters on, with their Qdrant index schema.
     # Qdrant indexes list-valued fields (pages, slides, section_path,
@@ -196,6 +238,7 @@ class QdrantService:
         self,
         chunks,
         vectors,
+        sparse_vectors: list[dict] | None = None,
     ):
 
         if len(chunks) != len(vectors):
@@ -204,12 +247,31 @@ class QdrantService:
                 f"{len(chunks)} chunks vs {len(vectors)} vectors"
             )
 
+        if (
+            sparse_vectors is not None
+            and len(sparse_vectors) != len(chunks)
+        ):
+            raise ValueError(
+                "chunk/sparse-vector count mismatch: "
+                f"{len(chunks)} chunks vs {len(sparse_vectors)} "
+                "sparse vectors"
+            )
+
         points = []
 
-        for chunk, vector in zip(
-            chunks,
-            vectors,
-        ):
+        for i, chunk in enumerate(chunks):
+
+            if sparse_vectors is None:
+                vector = vectors[i]
+            else:
+                vector = {
+                    # `""` is the reserved name for the default (unnamed)
+                    # dense vector in a multi-vector point.
+                    "": vectors[i],
+                    self.SPARSE_VECTOR_NAME: (
+                        sparse_vectors[i]
+                    ),
+                }
 
             points.append(
                 models.PointStruct(
@@ -263,3 +325,122 @@ class QdrantService:
                     time.sleep(delay)
 
         return results
+
+    # ------------------------------------------------------------------
+    # Tenant-safe metadata filter
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def tenant_filter(
+        user_id: str,
+        doc_ids: list[str] | None = None,
+        chunk_type: str | None = "child",
+    ) -> models.Filter:
+        """Build the metadata Filter used for authorization + selection.
+
+        Always ties results to ``user_id`` (sourced from the authenticated
+        request, never client-supplied). Optionally restricts to a subset of
+        documents and/or a chunk type (default: child/leaf chunks).
+        """
+        must = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            )
+        ]
+
+        if doc_ids:
+            must.append(
+                models.FieldCondition(
+                    key="doc_id",
+                    match=models.MatchAny(any=list(doc_ids)),
+                )
+            )
+
+        if chunk_type:
+            must.append(
+                models.FieldCondition(
+                    key="chunk_type",
+                    match=models.MatchValue(value=chunk_type),
+                )
+            )
+
+        return models.Filter(must=must)
+
+    @staticmethod
+    def _sparse_query(sparse_vector: dict) -> models.SparseVector:
+        """Build the named sparse vector query for a single modality prefix."""
+        return models.SparseVector(
+            indices=sparse_vector.get("indices", []),
+            values=sparse_vector.get("values", []),
+        )
+
+    # ------------------------------------------------------------------
+    # Hybrid dense + sparse (BM25) search, fused with RRF/DBSF
+    # ------------------------------------------------------------------
+
+    def hybrid_search(
+        self,
+        query_dense: list[float],
+        query_sparse: dict,
+        *,
+        user_id: str,
+        doc_ids: list[str] | None = None,
+        chunk_type: str | None = "child",
+        top_k: int = 5,
+        prefetch_dense: int = 20,
+        prefetch_sparse: int = 20,
+        fusion: str = "rrf",
+    ) -> list[dict]:
+        """Run dense + sparse hybrid retrieval over the tenant-filtered set.
+
+        Both ``query_dense`` (list of floats) and ``query_sparse``
+        ({"indices", "values"}) must be precomputed by the caller; this keeps
+        the Qdrant layer independent of embedding providers.
+
+        Returns the fused, top-``top_k`` scored points as plain dicts
+        (payload + score), sorted by descending fused score.
+        """
+        qfilter = self.tenant_filter(
+            user_id,
+            doc_ids=doc_ids,
+            chunk_type=chunk_type,
+        )
+
+        prefetch = [
+            models.Prefetch(
+                query=query_dense,
+                using="",
+                limit=prefetch_dense,
+                filter=qfilter,
+            ),
+            models.Prefetch(
+                query=self._sparse_query(query_sparse),
+                using=self.SPARSE_VECTOR_NAME,
+                limit=prefetch_sparse,
+                filter=qfilter,
+            ),
+        ]
+
+        if fusion and fusion.upper() == "DBSF":
+            fusion_query = models.Fusion.DBSF
+        else:
+            fusion_query = models.Fusion.RRF
+
+        result = self.client.query_points(
+            collection_name=self.collection_name,
+            prefetch=prefetch,
+            query=fusion_query,
+            limit=top_k,
+            with_payload=True,
+            with_vector=False,
+        )
+
+        return [
+            {
+                "id": str(point.id),
+                "score": float(point.score),
+                "payload": (point.payload or {}),
+            }
+            for point in result.points
+        ]

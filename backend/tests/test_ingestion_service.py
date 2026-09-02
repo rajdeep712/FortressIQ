@@ -80,12 +80,32 @@ class FakeQdrant:
     def __init__(self):
         self.deleted = []
         self.upserted = []
+        self.last_sparse = None
 
     def delete_chunks_by_doc(self, doc_id):
         self.deleted.append(doc_id)
 
-    def upsert_chunks(self, chunks, vectors):
+    def upsert_chunks(self, chunks, vectors, sparse_vectors=None):
         self.upserted.append((len(chunks), len(vectors)))
+        self.last_sparse = sparse_vectors
+
+
+class FakeSparseEmbedding:
+    def __init__(self, available=True, vectors=None):
+        self.available = available
+        self.vectors = vectors
+        self.calls = []
+
+    def embed(self, texts):
+        self.calls.append(texts)
+        if not self.available:
+            raise RuntimeError("sparse model unavailable")
+        if self.vectors is not None:
+            return list(self.vectors)
+        return [
+            {"indices": [1, 2, i], "values": [0.5, 1.0, 1.0]}
+            for i in range(len(texts))
+        ]
 
 
 class FakeParser:
@@ -143,6 +163,7 @@ def make_service(session_factory, monkeypatch):
     svc = object.__new__(IngestionService)
     svc.s3 = FakeS3()
     svc.embedding = FakeEmbedding()
+    svc.sparse_embedding = FakeSparseEmbedding()
     svc.qdrant = FakeQdrant()
     monkeypatch.setattr(
         ingestion_module,
@@ -305,5 +326,74 @@ def test_ingest_tags_embedder_on_children(
                 .get("embedder")
                 == "sentence-transformer"
             )
+    finally:
+        session.close()
+
+
+def test_ingest_upserts_sparse_vectors_with_children(
+    session_factory,
+    monkeypatch,
+):
+    persist_document(session_factory)
+
+    svc = make_service(session_factory, monkeypatch)
+    result = svc.ingest_document("doc1", "u1")
+
+    embedded = result["embedded_chunks"]
+    assert svc.qdrant.last_sparse is not None
+    assert len(svc.qdrant.last_sparse) == embedded
+    for sparse in svc.qdrant.last_sparse:
+        assert set(sparse) == {"indices", "values"}
+        assert sparse["indices"]
+        assert sparse["values"]
+
+
+def test_ingest_fails_when_sparse_model_unavailable(
+    session_factory,
+    monkeypatch,
+):
+    persist_document(session_factory)
+
+    svc = make_service(session_factory, monkeypatch)
+    svc.sparse_embedding = FakeSparseEmbedding(available=False)
+
+    with pytest.raises(RuntimeError):
+        svc.ingest_document("doc1", "u1")
+
+    assert svc.qdrant.upserted == []
+    session = session_factory()
+    try:
+        assert (
+            DocumentRepository(session)
+            .get_by_id("doc1")
+            .status
+            == "FAILED"
+        )
+    finally:
+        session.close()
+
+
+def test_ingest_fails_when_sparse_count_mismatch(
+    session_factory,
+    monkeypatch,
+):
+    persist_document(session_factory)
+
+    svc = make_service(session_factory, monkeypatch)
+    # Deliberately fewer sparse vectors (zero) than child chunks.
+    svc.sparse_embedding = FakeSparseEmbedding(vectors=[])
+
+    with pytest.raises(RuntimeError, match="Sparse embedding"):
+        svc.ingest_document("doc1", "u1")
+
+    assert svc.qdrant.upserted == []
+    session = session_factory()
+    try:
+        assert (
+            DocumentRepository(session)
+            .get_by_id("doc1")
+            .status
+            == "FAILED"
+        )
     finally:
         session.close()

@@ -29,6 +29,7 @@ from app.services.auth_service import (
     AccountMergeRequiredError,
     AuthService,
     DuplicateEmailError,
+    EmailNotVerifiedError,
     InvalidCredentialsError,
     InvalidGoogleTokenError,
     PasswordResetError,
@@ -135,6 +136,11 @@ def login(
     except InvalidCredentialsError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        )
+    except EmailNotVerifiedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
             detail=str(exc),
         )
 

@@ -1,6 +1,7 @@
 import uuid
 
 import httpx
+import pytest
 from qdrant_client import models
 
 from app.ingestion.chunker import Chunk
@@ -330,6 +331,245 @@ def test_upsert_chunks_gives_up_after_max_retries():
         raise AssertionError("expected httpx.ReadTimeout")
 
     assert attempts["count"] == 2
+
+
+def test_upsert_chunks_with_sparse_vectors_builds_multivector_points():
+    calls = []
+
+    def record(**kwargs):
+        calls.append(kwargs)
+        return None
+
+    chunk = make_chunk(
+        chunk_id="child_6be9d94841814fa48177c1a06ebfc927",
+    )
+    client = FakeQdrantClient()
+    client.upsert = record
+
+    svc = make_batched_service(client)
+    svc.upsert_chunks(
+        [chunk],
+        [[0.1, 0.2]],
+        sparse_vectors=[
+            {"indices": [3, 7], "values": [0.5, 0.9]},
+        ],
+    )
+
+    point = calls[0]["points"][0]
+    vector = point.vector
+    # Dense default is keyed by the reserved empty-string name.
+    assert vector[""] == [0.1, 0.2]
+    sparse = vector[QdrantService.SPARSE_VECTOR_NAME]
+    assert isinstance(sparse, models.SparseVector)
+    assert sparse.indices == [3, 7]
+    assert sparse.values == [0.5, 0.9]
+
+
+def test_upsert_chunks_rejects_sparse_count_mismatch():
+    svc = make_service(FakeQdrantClient())
+    with pytest.raises(ValueError, match="sparse"):
+        svc.upsert_chunks(
+            [make_chunk()],
+            [[0.1]],
+            sparse_vectors=[{"indices": [], "values": []}] * 2,
+        )
+
+
+def test_ensure_sparse_config_adds_sparse_vector_when_missing():
+    client = FakeQdrantClient()
+    client.get_collection = lambda name: type(
+        "_Info",
+        (),
+        {
+            "config": type(
+                "_Config",
+                (),
+                {
+                    "params": type(
+                        "_Params",
+                        (),
+                        {"sparse_vectors": {}},
+                    )()
+                },
+            )()
+        },
+    )()
+    client.update_collection = lambda **kw: (_ for _ in ()).throw(
+        AssertionError("update_collection must not be used")
+    )
+    created = []
+    client.create_vector_name = lambda **kw: created.append(kw)
+
+    svc = make_service(client)
+    svc._ensure_sparse_config()
+
+    assert len(created) == 1
+    call = created[0]
+    assert call["vector_name"] == QdrantService.SPARSE_VECTOR_NAME
+    config = call["vector_name_config"]
+    assert isinstance(config, models.SparseVectorNameConfig)
+    assert isinstance(
+        config.sparse,
+        models.SparseVectorConfig,
+    )
+
+
+def test_ensure_sparse_config_is_idempotent_when_present():
+    client = FakeQdrantClient()
+    updated = []
+    client.get_collection = lambda name: type(
+        "_Info",
+        (),
+        {
+            "config": type(
+                "_Config",
+                (),
+                {
+                    "params": type(
+                        "_Params",
+                        (),
+                        {"sparse_vectors": {QdrantService.SPARSE_VECTOR_NAME: "x"}},
+                    )()
+                },
+            )()
+        },
+    )()
+    client.update_collection = lambda **kw: updated.append(kw)
+
+    make_service(client)._ensure_sparse_config()
+    assert updated == []
+
+
+def test_ensure_collection_creates_dense_and_sparse_config():
+    calls = []
+
+    class CreateClient(FakeQdrantClient):
+        def collection_exists(self, collection_name):
+            return False
+
+        def create_collection(self, **kwargs):
+            calls.append(kwargs)
+
+    svc = make_service(CreateClient())
+    svc._ensure_collection(768)
+
+    assert len(calls) == 1
+    cfg = calls[0]["sparse_vectors_config"]
+    assert QdrantService.SPARSE_VECTOR_NAME in cfg
+    assert isinstance(
+        cfg[QdrantService.SPARSE_VECTOR_NAME],
+        models.SparseVectorParams,
+    )
+    dense = calls[0]["vectors_config"]
+    assert isinstance(dense, models.VectorParams)
+    assert dense.size == 768
+
+
+def _make_query_points_client():
+    client = FakeQdrantClient()
+    client.query_calls = []
+    client.query_points = lambda **kw: (
+        client.query_calls.append(kw) or _FakeQueryResult()
+    )
+    return client
+
+
+class _FakeScoredPoint:
+    def __init__(self, pid, score, payload):
+        self.id = pid
+        self.score = score
+        self.payload = payload
+
+
+class _FakeQueryResult:
+    def __init__(self, points=None):
+        self.points = points or []
+
+
+def test_tenant_filter_scopes_user_doc_and_chunk_type():
+    filt = QdrantService.tenant_filter(
+        user_id="u1",
+        doc_ids=["d1", "d2"],
+        chunk_type="child",
+    )
+    keys = [m.key for m in filt.must]
+    assert keys == ["user_id", "doc_id", "chunk_type"]
+    by_key = {m.key: m for m in filt.must}
+    assert by_key["user_id"].match.value == "u1"
+    assert by_key["doc_id"].match.any == ["d1", "d2"]
+    assert by_key["chunk_type"].match.value == "child"
+
+
+def test_hybrid_search_uses_prefetch_and_fusion():
+    client = _make_query_points_client()
+    points = [
+        _FakeScoredPoint("c1", 0.9, {"chunk_id": "c1"}),
+        _FakeScoredPoint("c2", 0.8, {"chunk_id": "c2"}),
+    ]
+    client.query_points = lambda **kw: (
+        client.query_calls.append(kw) or _FakeQueryResult(points)
+    )
+
+    results = make_service(client).hybrid_search(
+        [0.1, 0.2],
+        {"indices": [1], "values": [0.9]},
+        user_id="u1",
+        doc_ids=["d1", "d2"],
+        chunk_type="child",
+        top_k=3,
+        prefetch_dense=20,
+        prefetch_sparse=25,
+    )
+
+    assert client.query_calls
+    kw = client.query_calls[0]
+    assert kw["collection_name"] == "probe"
+    assert kw["limit"] == 3
+    assert kw["with_payload"] is True
+    assert kw["with_vector"] is False
+    assert kw["query"] is models.Fusion.RRF
+
+    dense_pf, sparse_pf = kw["prefetch"]
+    assert dense_pf.using == ""
+    assert dense_pf.limit == 20
+    assert sparse_pf.using == QdrantService.SPARSE_VECTOR_NAME
+    assert sparse_pf.limit == 25
+    assert sparse_pf.query.indices == [1]
+    assert sparse_pf.query.values == [0.9]
+
+    for pf in (dense_pf, sparse_pf):
+        keys = [m.key for m in pf.filter.must]
+        assert keys == ["user_id", "doc_id", "chunk_type"]
+
+    assert results == [
+        {"id": "c1", "score": 0.9, "payload": {"chunk_id": "c1"}},
+        {"id": "c2", "score": 0.8, "payload": {"chunk_id": "c2"}},
+    ]
+
+
+def test_hybrid_search_uses_dbsf_when_requested():
+    client = _make_query_points_client()
+    make_service(client).hybrid_search(
+        [0.1],
+        {"indices": [], "values": []},
+        user_id="u1",
+        fusion="dbsf",
+    )
+    assert client.query_calls[0]["query"] is models.Fusion.DBSF
+
+
+def test_hybrid_search_skips_empty_doc_filter():
+    client = _make_query_points_client()
+    make_service(client).hybrid_search(
+        [0.1],
+        {"indices": [], "values": []},
+        user_id="u1",
+        doc_ids=None,
+    )
+    kw = client.query_calls[0]
+    keys = [m.key for m in kw["prefetch"][0].filter.must]
+    assert "doc_id" not in keys
+    assert "user_id" in keys
 
 
 def test_upsert_chunks_does_not_retry_non_transient_errors():

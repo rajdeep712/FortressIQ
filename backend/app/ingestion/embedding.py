@@ -1,7 +1,13 @@
 import logging
 import os
+import time
 
 from app.core.config import settings
+from app.services.gemini_embedding import (
+    EMBEDDER_GEMINI,
+    GeminiEmbeddingService,
+    GeminiUnavailableError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,36 +92,214 @@ class SentenceTransformerEmbeddingService:
 
 
 class EmbeddingService:
+    """Facade: primary Gemini → lazy sentence-transformers fallback.
+
+    When no ``service`` is injected the constructor evaluates:
+
+    * ``embedding_provider="gemini"`` + non-empty ``gemini_api_key``
+      → creates ``GeminiEmbeddingService`` (with rate limiter).
+    * Otherwise (or if the Gemini constructor raises
+      ``GeminiUnavailableError``) → permanent ST-only mode.
+
+    At embed-time the Gemini path is tried first. On
+    ``GeminiUnavailableError`` the ST engine is loaded lazily, used for
+    that batch, and a cooldown timer starts so subsequent calls go
+    directly to ST until the cooldown expires.
+
+    The ``service`` injection point is preserved so tests that pass
+    ``service=FakeEmbedder`` keep working.
+    """
 
     def __init__(self, service=None):
-        self._service = (
-            service or SentenceTransformerEmbeddingService()
-        )
+        self._fallback_until: float = 0.0
+        self.last_provider: str | None = None
 
+        if service is not None:
+            self._gemini: GeminiEmbeddingService | None = None
+            self._service = service
+            if self._service.dimension != settings.embedding_dimension:
+                raise ValueError(
+                    f"Embedding dimension ({self._service.dimension}) "
+                    "does not match EMBEDDING_DIMENSION "
+                    f"({settings.embedding_dimension})."
+                )
+            self.last_provider = service.provider
+            return
+
+        # --- resolve primary engine ----------------------------------------
+        self._gemini: GeminiEmbeddingService | None = None
+        self._service: SentenceTransformerEmbeddingService | None = None
+
+        if (
+            settings.embedding_provider.lower() == "gemini"
+            and settings.gemini_api_key
+        ):
+            try:
+                self._gemini = GeminiEmbeddingService()
+                self.last_provider = EMBEDDER_GEMINI
+            except GeminiUnavailableError as exc:
+                logger.warning(
+                    "Gemini unavailable at startup, "
+                    "defaulting to sentence-transformers: %s",
+                    exc,
+                )
+
+        if self._gemini is None:
+            self._ensure_st()
+            self.last_provider = EMBEDDER_SENTENCE_TRANSFORMER
+
+    # --- lazy ST init (load once, cache forever) ---------------------------
+
+    def _ensure_st(self) -> SentenceTransformerEmbeddingService:
+        if self._service is not None:
+            return self._service
+        if _default_service is None:
+            raise RuntimeError(
+                "SentenceTransformerEmbeddingService was not initialized. "
+                "Call ``init_embedding_service`` or load the module before "
+                "creating an EmbeddingService."
+            )
+        self._service = _default_service
         if self._service.dimension != settings.embedding_dimension:
             raise ValueError(
                 f"Embedding dimension ({self._service.dimension}) "
                 "does not match EMBEDDING_DIMENSION "
                 f"({settings.embedding_dimension})."
             )
+        return self._service
 
-        self.last_provider: str | None = None
+    # --- cooldown helpers --------------------------------------------------
+
+    def _apply_cooldown(self) -> None:
+        self._fallback_until = (
+            time.time() + settings.gemini_fallback_cooldown_seconds
+        )
+        self.last_provider = EMBEDDER_SENTENCE_TRANSFORMER
+        logger.warning(
+            "Gemini unavailable — cooldown %ds → sentence-transformers",
+            settings.gemini_fallback_cooldown_seconds,
+        )
+
+    def _gemini_is_ready(self) -> bool:
+        if self._gemini is None:
+            return False
+        if time.time() < self._fallback_until:
+            return False
+        return True
+
+    # --- public API --------------------------------------------------------
 
     @property
     def dimension(self) -> int:
-        return self._service.dimension
+        if self._gemini_is_ready():
+            return self._gemini.dimension
+        return self._ensure_st().dimension
 
     def embed(
         self,
         texts: list[str],
     ) -> list[list[float]]:
-
         if not texts:
             self.last_provider = None
             return []
 
-        vectors = self._service.embed(texts)
+        if self._gemini_is_ready():
+            try:
+                vectors = self._gemini.embed(texts)
+                self.last_provider = EMBEDDER_GEMINI
+                return vectors
+            except GeminiUnavailableError:
+                self._apply_cooldown()
 
-        self.last_provider = self._service.provider
-
+        vectors = self._ensure_st().embed(texts)
+        self.last_provider = EMBEDDER_SENTENCE_TRANSFORMER
         return vectors
+
+
+# fastembed's SparseTextEmbedding yields objects with numpy `.indices` /
+# `.values`; we normalize those into plain JSON-friendly dicts.
+class SparseEmbedding:
+    """A sparse vector as Qdrant expects it."""
+
+    __slots__ = ("indices", "values")
+
+    def __init__(self, indices, values):
+        self.indices = [int(i) for i in indices]
+        self.values = [float(v) for v in values]
+
+    def to_qdrant(self) -> dict:
+        return {"indices": self.indices, "values": self.values}
+
+
+class SparseEmbeddingService:
+    """BM25 / SPLADE sparse embeddings via fastembed's SparseTextEmbedding.
+
+    Loads the model lazily (first use), so importing this module never pulls
+    in fastembed or downloads a model. If the model cannot be loaded (missing
+    fastembed, or hf_hub_offline=True and the model is not cached), the
+    service reports itself unavailable and returns empty embeddings rather
+    than crashing ingestion/retrieval.
+    """
+
+    def __init__(self, model_name: str | None = None, model=None, lazy: bool = True):
+        self.model_name = (
+            settings.sparse_model_name if model_name is None else model_name
+        )
+        self._model = model
+        self._load_error: Exception | None = None
+        if not lazy and model is None:
+            self.warm()
+
+    @property
+    def model_available(self) -> bool:
+        if self._model is not None:
+            return True
+        if self._load_error is not None:
+            return False
+        try:
+            self.warm()
+        except Exception as exc:  # noqa: BLE001
+            self._load_error = exc
+            logger.warning(
+                "Sparse embedding model unavailable (%s): %s",
+                self.model_name,
+                exc,
+            )
+            return False
+        return self._model is not None
+
+    def warm(self) -> None:
+        """Load (or re-load) the underlying fastembed model; raises on failure."""
+        if self._model is not None:
+            return
+        try:
+            from fastembed import SparseTextEmbedding
+
+            self._model = SparseTextEmbedding(self.model_name)
+        except Exception as exc:  # noqa: BLE001
+            self._load_error = exc
+            raise
+
+    def _encode(self, texts: list[str]) -> list[SparseEmbedding]:
+        if not self.model_available:
+            return []
+        out = []
+        for sparse in self._model.embed(texts):
+            out.append(
+                SparseEmbedding(sparse.indices, sparse.values)
+            )
+        return out
+
+    def embed(self, texts: list[str]) -> list[dict]:
+        """Return sparse vectors as Qdrant-compatible dicts."""
+        return [
+            vec.to_qdrant()
+            for vec in self._encode(texts)
+        ]
+
+    def query_embed(self, text: str) -> dict:
+        """Return a single sparse Qdrant dict for a query string."""
+        if not self.model_available or not text.strip():
+            return {"indices": [], "values": []}
+        vecs = self._encode([text])
+        return vecs[0].to_qdrant() if vecs else {"indices": [], "values": []}

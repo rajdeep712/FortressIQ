@@ -10,7 +10,10 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.ingestion.chunker import chunk_document
-from app.ingestion.embedding import EmbeddingService
+from app.ingestion.embedding import (
+    EmbeddingService,
+    SparseEmbeddingService,
+)
 from app.ingestion.parsers import get_parser
 from app.repositories.chunk_repository import ChunkRepository
 from app.repositories.document_repository import DocumentRepository
@@ -25,6 +28,7 @@ class IngestionService:
     def __init__(self):
         self.s3 = S3Service()
         self.embedding = EmbeddingService()
+        self.sparse_embedding = SparseEmbeddingService()
         self.qdrant = QdrantService(
             url=settings.qdrant_url,
             api_key=settings.qdrant_api_key,
@@ -144,6 +148,22 @@ class IngestionService:
                         self.embedding.last_provider
                     )
 
+            # Compute BM25 sparse vectors for every child chunk.
+            # This is strict: if the sparse model is unavailable or the
+            # produced vectors don't match the child chunks, ingest fails
+            # rather than silently storing dense-only points (which would
+            # be invisible to hybrid search's sparse arm).
+            sparse_vectors = self.sparse_embedding.embed(
+                [chunk.text for chunk in child_chunks]
+            )
+
+            if len(sparse_vectors) != len(child_chunks):
+                raise RuntimeError(
+                    "Sparse embedding produced "
+                    f"{len(sparse_vectors)} vectors for "
+                    f"{len(child_chunks)} child chunks; aborting ingest"
+                )
+
             # --------------------------------------------------
             # Persist metadata + store vectors in Qdrant
             # --------------------------------------------------
@@ -153,6 +173,7 @@ class IngestionService:
             self.qdrant.upsert_chunks(
                 chunks=child_chunks,
                 vectors=vectors,
+                sparse_vectors=sparse_vectors,
             )
 
             document_repository.update_status(

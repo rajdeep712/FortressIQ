@@ -53,6 +53,10 @@ class InvalidCredentialsError(Exception):
     pass
 
 
+class EmailNotVerifiedError(Exception):
+    pass
+
+
 class InvalidGoogleTokenError(Exception):
     pass
 
@@ -332,6 +336,14 @@ class AuthService:
         ):
             raise InvalidCredentialsError(
                 "Invalid email or password."
+            )
+
+        # Only verified accounts may sign in. Google-linked accounts are
+        # marked verified during OAuth, so this only ever blocks local
+        # (email/password) accounts that haven't confirmed their email yet.
+        if not user.is_verified:
+            raise EmailNotVerifiedError(
+                "Please verify your email before logging in."
             )
 
         user = self.repository.record_login(user)

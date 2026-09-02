@@ -34,3 +34,8 @@ redis
 # Local embeddings (torch CPU):
 # pip install --index-url https://download.pytorch.org/whl/cpu torch
 sentence-transformers
+
+# Retrieval: BM25 sparse embeddings + cross-encoder reranking
+fastembed
+flashrank
+onnxruntime
