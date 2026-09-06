@@ -241,31 +241,13 @@ class PdfParser(DocumentParser):
                 )
 
             # ----------------------------------------------
-            # Nested kids and list_items
+            # Nested kids and list_items ("list items" is the
+            # space-key variant emitted by opendataloader_pdf).
             # ----------------------------------------------
 
-            children: list[Any] = []
-
-            kids = node.get(
-                "kids",
-                [],
+            children = self._get_children(
+                node
             )
-
-            if isinstance(
-                kids,
-                list,
-            ):
-                children.extend(kids)
-
-            list_items = node.get(
-                "list_items",
-            )
-
-            if isinstance(
-                list_items,
-                list,
-            ):
-                children.extend(list_items)
 
             for child in reversed(children):
 
@@ -610,6 +592,8 @@ class PdfParser(DocumentParser):
 
             "list_item": "list_item",
 
+            "listitem": "list_item",
+
             "image": "image",
 
             "figure": "image",
@@ -719,33 +703,43 @@ class PdfParser(DocumentParser):
     # ======================================================
 
     @staticmethod
+    def _get_children(
+        node: dict[str, Any],
+    ) -> list[Any]:
+        """Collect every nested child node.
+
+        opendataloader_pdf emits list entries under ``"list items"``
+        (space), while older payloads use ``"list_items"`` (underscore);
+        check both, plus the generic ``"kids"`` key.
+        """
+        children: list[Any] = []
+
+        for key in ("kids", "list_items", "list items"):
+
+            value = node.get(key)
+
+            if not isinstance(
+                value,
+                list,
+            ):
+                continue
+
+            children.extend(
+                value
+            )
+
+        return children
+
+    @staticmethod
     def _has_children(
         node: dict[str, Any],
     ) -> bool:
 
-        kids = node.get(
-            "kids"
+        return bool(
+            PdfParser._get_children(
+                node
+            )
         )
-
-        if isinstance(
-            kids,
-            list,
-        ) and kids:
-
-            return True
-
-        list_items = node.get(
-            "list_items"
-        )
-
-        if isinstance(
-            list_items,
-            list,
-        ) and list_items:
-
-            return True
-
-        return False
 
     # ======================================================
     # IDs

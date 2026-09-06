@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.deps import get_current_user, require_verified_user
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.tracing import maybe_span, turn_context
 from app.models.user import User
 from app.repositories.chunk_repository import ChunkRepository
 from app.repositories.document_repository import DocumentRepository
@@ -44,22 +45,30 @@ async def upload_document(
     )
 
     try:
-        document = await document_service.upload_document(
-            upload_file=file,
-            user_id=user_id,
-        )
+        with turn_context(chat_id="", user_id=user_id):
+            with maybe_span(
+                "upload_document",
+                kind="CHAIN",
+                user_id=user_id,
+                filename=file.filename or "",
+                content_type=file.content_type or "",
+            ):
+                document = await document_service.upload_document(
+                    upload_file=file,
+                    user_id=user_id,
+                )
 
-        return DocumentUploadResponse(
-            doc_id=document.doc_id,
-            user_id=document.user_id,
-            filename=document.original_filename,
-            mime_type=document.mime_type,
-            size=document.file_size,
-            sha256=document.sha256,
-            s3_key=document.s3_key,
-            status=document.status,
-            created_at=document.created_at,
-        )
+            return DocumentUploadResponse(
+                doc_id=document.doc_id,
+                user_id=document.user_id,
+                filename=document.original_filename,
+                mime_type=document.mime_type,
+                size=document.file_size,
+                sha256=document.sha256,
+                s3_key=document.s3_key,
+                status=document.status,
+                created_at=document.created_at,
+            )
 
     except ValueError as exc:
         raise HTTPException(

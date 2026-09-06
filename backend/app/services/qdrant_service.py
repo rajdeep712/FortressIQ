@@ -4,6 +4,7 @@ import time
 import uuid
 
 import httpx
+from typing import Any
 from qdrant_client import (
     QdrantClient,
     models,
@@ -379,6 +380,19 @@ class QdrantService:
     # Hybrid dense + sparse (BM25) search, fused with RRF/DBSF
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _fusion_query(fusion: str | None) -> Any:
+        """Build the Qdrant fusion query object for a modality prefix.
+
+        Newer qdrant-client versions (>= 1.19) require wrapping the fusion
+        enum in a ``FusionQuery``; older ones accept ``Fusion.RRF`` directly.
+        """
+        name = (fusion or "rrf").upper()
+        choice = getattr(models.Fusion, name, models.Fusion.RRF)
+        if "fusion" in getattr(models.FusionQuery, "model_fields", {}):
+            return models.FusionQuery(fusion=choice)
+        return choice
+
     def hybrid_search(
         self,
         query_dense: list[float],
@@ -422,10 +436,7 @@ class QdrantService:
             ),
         ]
 
-        if fusion and fusion.upper() == "DBSF":
-            fusion_query = models.Fusion.DBSF
-        else:
-            fusion_query = models.Fusion.RRF
+        fusion_query = self._fusion_query(fusion)
 
         result = self.client.query_points(
             collection_name=self.collection_name,
@@ -433,7 +444,7 @@ class QdrantService:
             query=fusion_query,
             limit=top_k,
             with_payload=True,
-            with_vector=False,
+            with_vectors=False,
         )
 
         return [

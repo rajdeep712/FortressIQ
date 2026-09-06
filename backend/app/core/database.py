@@ -5,14 +5,32 @@ from app.core.config import settings  ## import the configuration settings objec
 from app.models.document import Base  ## contains your SQLAlchemy models/tables.
 
 
+def _is_sqlite(url: str) -> bool:
+    return url.startswith("sqlite")
+
+
+def _engine_url(raw: str) -> str:
+    """Normalize the configured URL for SQLAlchemy.
+
+    SQLAlchemy only understands ``postgresql://`` / ``postgresql+driver://``;
+    it cannot load a dialect for the ``postgres://`` scheme. Psycopg3 is the
+    installed driver, so normalize ``postgres://`` -> ``postgresql+psycopg://``.
+    """
+    if raw.startswith("postgres://"):
+        return "postgresql+psycopg://" + raw[len("postgres://"):]
+    return raw
+
+
 engine = create_engine(
-    settings.database_url,
+    _engine_url(settings.database_url),
     connect_args={
         "check_same_thread": False  ## This is only required for sqlite, because SQLite normally restricts database access to the thread that created the connection.
     }
-    if settings.database_url.startswith("sqlite")
+    if _is_sqlite(settings.database_url)
     else {},
+    pool_pre_ping=True,
 )
+
 
 SessionLocal = sessionmaker(
     bind=engine,
@@ -22,6 +40,7 @@ SessionLocal = sessionmaker(
 
 
 def init_db():
+    import app.models  # noqa: F401  (register all models on the shared Base)
     Base.metadata.create_all(bind=engine)  ## Look at all my models and create their tables in the database if they don't already exist.
 
     ## create_all never alters existing tables, so newly added columns on
@@ -36,13 +55,13 @@ def init_db():
         engine,
         table="users",
         column="is_active",
-        definition="BOOLEAN NOT NULL DEFAULT 1",
+        definition="BOOLEAN NOT NULL DEFAULT TRUE",
     )
     _add_column_if_missing(
         engine,
         table="users",
         column="last_login_at",
-        definition="DATETIME",
+        definition="TIMESTAMP",
     )
     _add_column_if_missing(
         engine,
@@ -54,13 +73,13 @@ def init_db():
         engine,
         table="users",
         column="password_reset_token_expire_date",
-        definition="DATETIME",
+        definition="TIMESTAMP",
     )
     _add_column_if_missing(
         engine,
         table="refresh_tokens",
         column="used_at",
-        definition="DATETIME",
+        definition="TIMESTAMP",
     )
     _add_column_if_missing(
         engine,
@@ -70,29 +89,55 @@ def init_db():
     )
 
 
+def _column_names_postgres(engine, table: str):
+    with engine.connect() as conn:
+        rows = conn.exec_driver_sql(
+            "SELECT column_name FROM information_schema.columns"
+            " WHERE table_name = %s",
+            (table,),
+        ).fetchall()
+    return {row[0] for row in rows}
+
+
+def _column_names_sqlite(engine, table: str):
+    with engine.connect() as conn:
+        rows = conn.exec_driver_sql(
+            f"PRAGMA table_info({table})"
+        ).fetchall()
+    return {row[1] for row in rows}
+
+
 def _add_column_if_missing(
     engine,
     table: str,
     column: str,
     definition: str,
 ):
+    is_sqlite = _is_sqlite(str(engine.url))
+
     try:
-        with engine.connect() as conn:
-            existing = [
-                row[1]
-                for row in conn.exec_driver_sql(
-                    f"PRAGMA table_info({table})"
-                ).fetchall()
-            ]
+        existing = (
+            _column_names_sqlite(engine, table)
+            if is_sqlite
+            else _column_names_postgres(engine, table)
+        )
     except Exception:
         # Table does not exist yet (create_all handles it above).
         return
 
     if column not in existing:
-        with engine.begin() as conn:
-            conn.exec_driver_sql(
-                f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
-            )
+        try:
+            with engine.begin() as conn:
+                conn.exec_driver_sql(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+                )
+        except Exception:
+            # A concurrent `create_all` / another replica may have already
+            # added the column; swallow idempotent collisions on Postgres.
+            if not is_sqlite:
+                return
+            raise
+
 
 ## Provide sessions to FastAPI endpoints (get_db)
 def get_db():

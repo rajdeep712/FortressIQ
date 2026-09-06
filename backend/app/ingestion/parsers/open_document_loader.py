@@ -135,6 +135,9 @@ if __name__ == "__main__":
             filename="example.pdf",
             mime_type="application/pdf",
         )
-        print(result)
+        # print(result.elements)
+        for element in result.elements:
+            print(element.text)
+            print("\n\n")
 
     asyncio.run(main())

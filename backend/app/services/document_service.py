@@ -19,6 +19,7 @@ from app.services.file_validator import (
     check_zip_limits,
 )
 from app.services.hash_service import calculate_sha256
+from app.core.tracing import maybe_span
 from app.services.malware_scanner import MalwareScanner
 from app.services.s3_service import S3Service
 from app.utils.filenames import sanitize_filename
@@ -180,18 +181,26 @@ class DocumentService:
             # 13. Upload to S3
             # --------------------------------------------------
 
-            try:
-                self.s3.upload_file(
-                    file_path=temp_path,
-                    s3_key=s3_key,
-                    content_type=mime_type,
-                )
-            except Exception:
-                logger.exception(
-                    "S3 upload failed for doc_id=%s",
-                    doc_id,
-                )
-                raise ValueError("Failed to store document.")
+            with maybe_span(
+                "upload_document.s3_upload",
+                kind="TOOL",
+                doc_id=doc_id,
+                s3_key=s3_key,
+                content_type=mime_type,
+                file_size_bytes=total_size,
+            ):
+                try:
+                    self.s3.upload_file(
+                        file_path=temp_path,
+                        s3_key=s3_key,
+                        content_type=mime_type,
+                    )
+                except Exception:
+                    logger.exception(
+                        "S3 upload failed for doc_id=%s",
+                        doc_id,
+                    )
+                    raise ValueError("Failed to store document.")
 
             logger.info(
                 "S3 upload complete: doc_id=%s s3_key=%s",
@@ -217,7 +226,12 @@ class DocumentService:
             )
 
             try:
-                document = self.repository.create(document)
+                with maybe_span(
+                    "upload_document.persist_db",
+                    kind="CHAIN",
+                    doc_id=doc_id,
+                ):
+                    document = self.repository.create(document)
             except IntegrityError:
                 # Race condition: another request uploaded the
                 # same content simultaneously. Clean up S3 object.

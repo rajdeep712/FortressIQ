@@ -457,6 +457,29 @@ def test_document_search_passes_tenant_filter_and_returns_hits():
     assert result.hits[0].section_path == ["Intro"]
 
 
+def test_document_search_attaches_rerank_scores():
+    qdrant = FakeQdrant(
+        points=[_point("c1", 0.8), _point("c2", 0.6)]
+    )
+
+    class ScoredFakeReranker(FakeReranker):
+        def rerank_with_scores(self, query, passages, top_k):
+            return [(1, 0.92), (0, 0.71)]
+
+    result = retrieve_documents(
+        "why qdrant",
+        user_id="u1",
+        embedder=FakeEmbeddingService(),
+        sparse_embedder=FakeSparseEmbedder(),
+        qdrant=qdrant,
+        reranker=ScoredFakeReranker(order=[1, 0]),
+        top_k=2,
+    )
+    assert [h.chunk_id for h in result.hits] == ["c2", "c1"]
+    assert result.hits[0].rerank_score == 0.92
+    assert result.hits[1].rerank_score == 0.71
+
+
 def test_document_search_reranker_absent_falls_back_to_fusion_order():
     qdrant = FakeQdrant(
         points=[_point("c1", 0.8), _point("c2", 0.6), _point("c3", 0.4)]

@@ -526,8 +526,9 @@ def test_hybrid_search_uses_prefetch_and_fusion():
     assert kw["collection_name"] == "probe"
     assert kw["limit"] == 3
     assert kw["with_payload"] is True
-    assert kw["with_vector"] is False
-    assert kw["query"] is models.Fusion.RRF
+    assert kw["with_vectors"] is False
+    assert isinstance(kw["query"], models.FusionQuery)
+    assert kw["query"].fusion is models.Fusion.RRF
 
     dense_pf, sparse_pf = kw["prefetch"]
     assert dense_pf.using == ""
@@ -555,7 +556,7 @@ def test_hybrid_search_uses_dbsf_when_requested():
         user_id="u1",
         fusion="dbsf",
     )
-    assert client.query_calls[0]["query"] is models.Fusion.DBSF
+    assert client.query_calls[0]["query"].fusion is models.Fusion.DBSF
 
 
 def test_hybrid_search_skips_empty_doc_filter():

@@ -1,3 +1,4 @@
+import functools
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.tracing import maybe_span
 from app.models.user import User
 from app.repositories.refresh_token_repository import RefreshTokenRepository
 from app.repositories.user_repository import UserRepository
@@ -84,10 +86,39 @@ def _service(db: Session) -> AuthService:
     )
 
 
+def _trace_endpoint(name: str, **attributes):
+    """Wrap an auth endpoint body in a Phoenix CHAIN span (no-op when off)."""
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            attrs = dict(attributes)
+            body = kwargs.get("body")
+            if body is not None:
+                email = getattr(body, "email", None)
+                if email:
+                    attrs["email"] = email
+            request = kwargs.get("request")
+            client = getattr(request, "client", None)
+            if client is not None:
+                attrs["request_ip"] = client.host
+            with maybe_span(name, kind="CHAIN", **attrs):
+                return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 @router.post(
     "/register",
     response_model=AuthResponse,
     status_code=status.HTTP_201_CREATED,
+)
+@_trace_endpoint(
+    "auth.register",
+    method="POST",
+    path="/api/v1/auth/register",
 )
 def register(
     body: RegisterRequest,
@@ -121,6 +152,11 @@ def register(
     "/login",
     response_model=AuthResponse,
 )
+@_trace_endpoint(
+    "auth.login",
+    method="POST",
+    path="/api/v1/auth/login",
+)
 def login(
     body: LoginRequest,
     request: Request,
@@ -152,6 +188,11 @@ def login(
     "/google",
     status_code=status.HTTP_307_TEMPORARY_REDIRECT,
 )
+@_trace_endpoint(
+    "auth.google.start",
+    method="GET",
+    path="/api/v1/auth/google",
+)
 def google_login_url(
     request: Request,
 ):
@@ -171,6 +212,12 @@ def google_login_url(
 
 @router.get(
     "/google/callback",
+)
+@_trace_endpoint(
+    "auth.google.callback",
+    method="GET",
+    path="/api/v1/auth/google/callback",
+    provider="google",
 )
 def google_callback(
     request: Request,
@@ -238,6 +285,12 @@ def google_callback(
     "/google/merge",
     response_model=AuthResponse,
 )
+@_trace_endpoint(
+    "auth.google.merge",
+    method="POST",
+    path="/api/v1/auth/google/merge",
+    provider="google",
+)
 def google_merge(
     body: GoogleMergeRequest,
     request: Request,
@@ -263,6 +316,11 @@ def google_merge(
 @router.post(
     "/refresh",
     response_model=AuthResponse,
+)
+@_trace_endpoint(
+    "auth.refresh",
+    method="POST",
+    path="/api/v1/auth/refresh",
 )
 def refresh_tokens(
     request: Request,
@@ -295,6 +353,11 @@ def refresh_tokens(
     "/logout",
     response_model=LogoutResponse,
 )
+@_trace_endpoint(
+    "auth.logout",
+    method="POST",
+    path="/api/v1/auth/logout",
+)
 def logout(
     request: Request,
     response: Response,
@@ -312,6 +375,11 @@ def logout(
     "/logout-all",
     response_model=LogoutResponse,
 )
+@_trace_endpoint(
+    "auth.logout_all",
+    method="POST",
+    path="/api/v1/auth/logout-all",
+)
 def logout_all(
     response: Response,
     current_user: User = Depends(get_current_user),
@@ -327,6 +395,11 @@ def logout_all(
     "/revoke-all-sessions",
     response_model=LogoutResponse,
 )
+@_trace_endpoint(
+    "auth.revoke_all_sessions",
+    method="POST",
+    path="/api/v1/auth/revoke-all-sessions",
+)
 def revoke_all_sessions(
     response: Response,
     current_user: User = Depends(get_current_user),
@@ -340,6 +413,11 @@ def revoke_all_sessions(
 @router.get(
     "/sessions",
     response_model=list[SessionResponse],
+)
+@_trace_endpoint(
+    "auth.sessions",
+    method="GET",
+    path="/api/v1/auth/sessions",
 )
 def sessions(
     current_user: User = Depends(get_current_user),
@@ -366,6 +444,11 @@ def sessions(
     "/forgot-password",
     response_model=ResendResponse,
 )
+@_trace_endpoint(
+    "auth.forgot_password",
+    method="POST",
+    path="/api/v1/auth/forgot-password",
+)
 def forgot_password(
     body: ForgotPasswordRequest,
     request: Request,
@@ -381,6 +464,11 @@ def forgot_password(
 @router.post(
     "/reset-password",
     response_model=ResendResponse,
+)
+@_trace_endpoint(
+    "auth.reset_password",
+    method="POST",
+    path="/api/v1/auth/reset-password",
 )
 def reset_password(
     body: ResetPasswordRequest,
@@ -407,6 +495,11 @@ def reset_password(
     "/verify-email",
     response_model=VerifiedResponse,
 )
+@_trace_endpoint(
+    "auth.verify_email",
+    method="POST",
+    path="/api/v1/auth/verify-email",
+)
 def verify_email(
     body: VerifyEmailRequest,
     db: Session = Depends(get_db),
@@ -429,6 +522,11 @@ def verify_email(
     "/resend-verification",
     response_model=ResendResponse,
 )
+@_trace_endpoint(
+    "auth.resend_verification",
+    method="POST",
+    path="/api/v1/auth/resend-verification",
+)
 def resend_verification(
     body: ResendVerificationRequest,
     db: Session = Depends(get_db),
@@ -440,6 +538,11 @@ def resend_verification(
 @router.get(
     "/me",
     response_model=UserResponse,
+)
+@_trace_endpoint(
+    "auth.me",
+    method="GET",
+    path="/api/v1/auth/me",
 )
 def me(
     current_user: User = Depends(get_current_user),

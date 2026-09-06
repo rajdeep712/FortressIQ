@@ -19,6 +19,7 @@ from typing import Any, Iterable, Sequence
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import settings
+from app.core.tracing import maybe_span, set_span_attributes
 from app.ingestion.embedding import EmbeddingService, SparseEmbeddingService
 from app.retrieval.reranker import FlashRankReranker
 from app.services.qdrant_service import QdrantService
@@ -46,6 +47,25 @@ class DocumentSearchResult(BaseModel):
     rerank_used: bool = False
 
     model_config = ConfigDict(extra="forbid")
+
+
+def _rerank_scored(
+    reranker: Any,
+    query: str,
+    passages: Sequence[Any],
+    top_k: int,
+) -> list[tuple[int, float]]:
+    """Rerank and return ``(index, score)`` pairs, with index into ``passages``.
+
+    Uses ``rerank_with_scores`` when the reranker exposes it (preserving the
+    cross-encoder scores for logging); otherwise falls back to plain
+    ``rerank`` with a synthetic ``0.0`` score.
+    """
+    scored = getattr(reranker, "rerank_with_scores", None)
+    if callable(scored):
+        return scored(query, passages, top_k)
+    indices = reranker.rerank(query, passages, top_k)
+    return [(i, 0.0) for i in indices]
 
 
 def _payload_to_hit(point: dict, rerank_score: float | None = None) -> DocumentHit:
@@ -110,28 +130,53 @@ def retrieve_documents(
         else settings.rerank_required
     )
 
-    sparse_vectors = sparse_embedder.query_embed(
-        query_text
-    )
+    with maybe_span(
+        "retrieval.embed.sparse",
+        kind="EMBEDDING",
+        model=getattr(sparse_embedder, "model_name", "") or "",
+        text_count=1,
+    ):
+        sparse_vectors = sparse_embedder.query_embed(query_text)
 
-    dense_vectors = embedder.embed([query_text])
+    with maybe_span(
+        "retrieval.embed.dense",
+        kind="EMBEDDING",
+        model=getattr(embedder, "last_model", "") or "",
+        provider=getattr(embedder, "last_provider", "") or "",
+        dimension=getattr(embedder, "dimension", 0) or 0,
+        text_count=1,
+    ):
+        dense_vectors = embedder.embed([query_text])
     query_dense = (
         dense_vectors[0]
         if dense_vectors
         else [0.0] * embedder.dimension
     )
 
-    points = qdrant.hybrid_search(
-        query_dense,
-        sparse_vectors,
+    with maybe_span(
+        "retrieval.hybrid_search",
+        kind="RETRIEVER",
         user_id=user_id,
-        doc_ids=list(selected_doc_ids) if selected_doc_ids else None,
-        chunk_type="child",
-        top_k=max(top_k, prefetch_dense, prefetch_sparse),
+        selected_doc_count=(
+            len(selected_doc_ids) if selected_doc_ids else 0
+        ),
+        top_k=top_k,
         prefetch_dense=prefetch_dense,
         prefetch_sparse=prefetch_sparse,
         fusion=fusion,
-    )
+    ):
+        points = qdrant.hybrid_search(
+            query_dense,
+            sparse_vectors,
+            user_id=user_id,
+            doc_ids=list(selected_doc_ids) if selected_doc_ids else None,
+            chunk_type="child",
+            top_k=max(top_k, prefetch_dense, prefetch_sparse),
+            prefetch_dense=prefetch_dense,
+            prefetch_sparse=prefetch_sparse,
+            fusion=fusion,
+        )
+        set_span_attributes(result_count=len(points))
 
     fused: list[DocumentHit] = [_payload_to_hit(p) for p in points]
     dense_candidates = 0
@@ -139,9 +184,24 @@ def retrieve_documents(
 
     order: list[int]
     if reranker.available:
-        indices = reranker.rerank(query_text, fused, top_k)
-        if indices:
-            ordered = [fused[i] for i in indices]
+        with maybe_span(
+            "retrieval.rerank",
+            kind="RERANKER",
+            rerank_required=rerank_required,
+            input_count=len(fused),
+        ):
+            scored_ranks = _rerank_scored(
+                reranker, query_text, fused, top_k
+            )
+            set_span_attributes(
+                output_count=len(scored_ranks) if scored_ranks else 0,
+                rerank_used=bool(scored_ranks),
+            )
+        if scored_ranks:
+            ordered = [
+                fused[i].model_copy(update={"rerank_score": score})
+                for i, score in scored_ranks
+            ]
             reranked = len(ordered)
         elif rerank_required:
             raise RuntimeError(
@@ -150,7 +210,7 @@ def retrieve_documents(
         else:
             ordered = fused[:top_k]
             reranked = 0
-        rerank_used = bool(indices)
+        rerank_used = bool(scored_ranks)
     else:
         if rerank_required:
             raise RuntimeError(

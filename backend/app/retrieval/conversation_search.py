@@ -17,6 +17,8 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.tracing import maybe_span, set_span_attributes
+
 # A lightweight structural contract for an embedding provider. The real
 # implementation is app.ingestion.embedding.EmbeddingService (which exposes
 # `.embed(texts) -> list[list[float]]` and `.dimension`); tests inject a fake
@@ -183,40 +185,55 @@ def search_conversation(
     if not turns:
         return result
 
-    # Resolve the query vector (embed a string, or use the provided one).
-    if isinstance(query, str):
-        if not query.strip():
+    with maybe_span(
+        "conversation.search",
+        kind="EMBEDDING",
+        window=window,
+        top_k=top_k,
+        num_message_turns=len(turns),
+    ):
+        # Resolve the query vector (embed a string, or use the provided one).
+        if isinstance(query, str):
+            if not query.strip():
+                return result
+            query_vec = _embed(embedder, [query])[0]
+        else:
+            query_vec = list(query)
+
+        if not query_vec:
             return result
-        query_vec = _embed(embedder, [query])[0]
-    else:
-        query_vec = list(query)
 
-    if not query_vec:
-        return result
+        # Embed any candidate turns that do not already carry an embedding.
+        missing = [i for i, t in enumerate(turns) if not t.embedding]
+        if missing:
+            vectors = _embed(embedder, [turns[i].content for i in missing])
+            for i, vec in zip(missing, vectors):
+                turns[i].embedding = vec
 
-    # Embed any candidate turns that do not already carry an embedding.
-    missing = [i for i, t in enumerate(turns) if not t.embedding]
-    if missing:
-        vectors = _embed(embedder, [turns[i].content for i in missing])
-        for i, vec in zip(missing, vectors):
-            turns[i].embedding = vec
+        scored: list[ConversationHit] = []
+        for turn in turns:
+            if not turn.embedding:
+                continue
+            score = _cosine(query_vec, turn.embedding)
+            scored.append(ConversationHit(message=turn, score=score))
 
-    scored: list[ConversationHit] = []
-    for turn in turns:
-        if not turn.embedding:
-            continue
-        score = _cosine(query_vec, turn.embedding)
-        scored.append(ConversationHit(message=turn, score=score))
+        scored.sort(key=lambda h: h.score, reverse=True)
 
-    scored.sort(key=lambda h: h.score, reverse=True)
+        result.hits = scored[: max(top_k, 0)]
+        result.best_score = result.hits[0].score if result.hits else 0.0
+        result.mean_score = (
+            sum(h.score for h in result.hits) / len(result.hits)
+            if result.hits
+            else 0.0
+        )
+        result.num_searched = len(scored)
 
-    result.hits = scored[: max(top_k, 0)]
-    result.best_score = result.hits[0].score if result.hits else 0.0
-    result.mean_score = (
-        sum(h.score for h in result.hits) / len(result.hits)
-        if result.hits
-        else 0.0
-    )
-    result.num_searched = len(scored)
+        set_span_attributes(
+            query_embedded_as_text=isinstance(query, str),
+            embedded_candidates=len(missing),
+            num_searched=result.num_searched,
+            best_score=result.best_score,
+            hits=len(result.hits),
+        )
 
     return result

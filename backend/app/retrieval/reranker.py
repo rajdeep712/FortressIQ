@@ -143,6 +143,56 @@ class FlashRankReranker:
                 ordered.append(idx)
         return ordered[:top_k]
 
+    def rerank_with_scores(
+        self,
+        query: str,
+        passages: Sequence[Any],
+        top_k: int,
+    ) -> list[tuple[int, float]]:
+        """Return ``(index, score)`` pairs for the top-``top_k`` passages.
+
+        Unlike ``rerank`` (which discards scores), this exposes the
+        cross-encoder score for each selected passage so callers can log
+        which points were chosen *and* with what score. Falls back to an
+        empty list whenever reranking cannot run (mirrors ``rerank``).
+        """
+        if not passages or top_k <= 0:
+            return []
+        if not self.available:
+            return []
+
+        from flashrank import RerankRequest
+
+        text_of = _text_of
+        request = RerankRequest(
+            query=query,
+            passages=[
+                {"id": i, "text": text}
+                for i, text in enumerate(text_of(passages))
+            ],
+        )
+
+        try:
+            ranked = self._model.rerank(request)
+        except Exception as exc:  # noqa: BLE001
+            self._load_error = exc
+            logger.warning(
+                "FlashRank rerank (scored) failed; falling back: %s",
+                exc,
+            )
+            return []
+
+        ordered: list[tuple[int, float]] = []
+        for item in ranked:
+            idx = int(item.get("id", -1))
+            if idx < len(passages) and idx not in {i for i, _ in ordered}:
+                try:
+                    score = float(item.get("score", 0.0))
+                except (TypeError, ValueError):
+                    score = 0.0
+                ordered.append((idx, score))
+        return ordered[:top_k]
+
 
 def _text_of(passages: Sequence[Any]) -> list[str]:
     out = []

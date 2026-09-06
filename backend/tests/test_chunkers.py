@@ -28,13 +28,16 @@ def element(
     section_path=None,
     locations=None,
     metadata=None,
+    value=None,
+    parent=None,
 ):
     return ParsedElement(
-        element_id=str(uuid4()),
+        element_id=value or f"el_{uuid4().hex}",
         element_type=element_type,
         text=text,
         order=0,
         section_path=section_path or [],
+        parent_element_id=parent,
         locations=locations or [],
         metadata=metadata or {},
     )
@@ -137,8 +140,8 @@ def test_no_headings_produce_one_unsectioned_parent():
             element("line two", section_path=[]),
             element("line three", section_path=[]),
         ],
-        "application/pdf",
-        "simple.pdf",
+        "text/markdown",
+        "simple.md",
     )
     chunks = chunk_document(doc)
     parents, children = parents_children(chunks)
@@ -251,8 +254,8 @@ def test_section_soft_cap_splits_large_section_into_parts():
             element("x" * 7500),
             element("y" * 7500),
         ],
-        "application/pdf",
-        "big.pdf",
+        "text/markdown",
+        "big.md",
     )
     chunks = chunk_document(doc)
     parents, children = parents_children(chunks)
@@ -883,10 +886,12 @@ def test_child_metadata_is_a_self_contained_record():
                 "H1",
                 element_type="h1",
                 section_path=["Home"],
+                value="h1",
             ),
             element(
                 "intro",
                 section_path=["Home"],
+                parent="h1",
                 locations=[
                     SourceLocation(
                         type="pdf_bbox",

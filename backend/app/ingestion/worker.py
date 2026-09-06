@@ -11,6 +11,14 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import SessionLocal, init_db
+from app.core.tracing import (
+    flush,
+    maybe_span,
+    set_span_attributes,
+    setup_tracing,
+)
+from app.ingestion.embedding import EmbeddingService
+from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.document_repository import DocumentRepository
 from app.services.ingestion_service import IngestionService
 
@@ -86,12 +94,15 @@ async def startup(ctx):
     # The worker must not depend on the API having booted to create
     # the SQLite schema (init_db is idempotent).
     init_db()
+    setup_tracing("worker")
     ctx["sqs"] = _build_sqs_client()
     ctx["ingestion"] = IngestionService()
+    ctx["embedder"] = EmbeddingService()
     logger.info("ARQ worker started")
 
 
 async def shutdown(ctx):
+    flush()
     logger.info("ARQ worker shutting down")
 
 
@@ -158,28 +169,36 @@ async def poll_s3_events(ctx):
         WaitTimeSeconds=1,
     )
 
-    for message in response.get("Messages", []):
+    messages = response.get("Messages", [])
 
-        delete_message = False
+    with maybe_span(
+        "poll_s3_events",
+        kind="CHAIN",
+        queue=queue_url,
+        message_count=len(messages),
+    ):
+        for message in messages:
 
-        try:
-            delete_message = await _handle_s3_event(
-                ctx=ctx,
-                sqs=sqs,
-                queue_url=queue_url,
-                message=message,
-            )
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "Failed to process SQS message; leaving it for redelivery."
-            )
+            delete_message = False
 
-        if delete_message:
-            await asyncio.to_thread(
-                sqs.delete_message,
-                QueueUrl=queue_url,
-                ReceiptHandle=message["ReceiptHandle"],
-            )
+            try:
+                delete_message = await _handle_s3_event(
+                    ctx=ctx,
+                    sqs=sqs,
+                    queue_url=queue_url,
+                    message=message,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Failed to process SQS message; leaving it for redelivery."
+                )
+
+            if delete_message:
+                await asyncio.to_thread(
+                    sqs.delete_message,
+                    QueueUrl=queue_url,
+                    ReceiptHandle=message["ReceiptHandle"],
+                )
 
 
 async def ingest_document(
@@ -187,15 +206,67 @@ async def ingest_document(
     doc_id: str,
     user_id: str,
 ) -> dict:
-    return await asyncio.to_thread(
-        ctx["ingestion"].ingest_document,
-        doc_id,
-        user_id,
-    )
+    with maybe_span("ingest_document", kind="CHAIN", doc_id=doc_id, user_id=user_id):
+        result = await asyncio.to_thread(
+            ctx["ingestion"].ingest_document,
+            doc_id,
+            user_id,
+        )
+    return result
+
+
+async def embed_chat_message(
+    ctx,
+    message_id: str,
+    content: str,
+) -> dict:
+    """Background job: embed a chat message and persist its vector.
+
+    Runs off the request hot path so history similarity search reads
+    precomputed embeddings instead of embedding on each query. Falls
+    back gracefully if the embedding backend is unavailable.
+    """
+    if not content.strip():
+        return {"message_id": message_id, "embedded": False}
+
+    def _work() -> dict:
+        db = SessionLocal()
+        try:
+            row = ConversationRepository(db).get_message(message_id)
+            if row is None:
+                return {"message_id": message_id, "embedded": False}
+            with maybe_span(
+                "embed_chat_message",
+                kind="EMBEDDING",
+                message_id=message_id,
+                chat_id=getattr(row, "chat_id", "") or "",
+            ):
+                vectors = ctx["embedder"].embed([content])
+                if not vectors:
+                    return {"message_id": message_id, "embedded": False}
+                ok = ConversationRepository(db).update_embedding(
+                    message_id, vectors[0]
+                )
+                set_span_attributes(
+                    provider=ctx["embedder"].last_provider or "",
+                    model=ctx["embedder"].last_model or "",
+                    embedded=ok,
+                )
+            return {
+                "message_id": message_id,
+                "embedded": ok,
+                "provider": ctx["embedder"].last_provider,
+            }
+        finally:
+            db.close()
+
+    result = await asyncio.to_thread(_work)
+    logger.info("Embedded chat message %s (embedded=%s)", message_id, result.get("embedded"))
+    return result
 
 
 class WorkerSettings:
-    functions = [ingest_document, poll_s3_events]
+    functions = [ingest_document, poll_s3_events, embed_chat_message]
     cron_jobs = [
         cron(
             poll_s3_events,

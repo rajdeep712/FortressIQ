@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.ingestion.chunker import chunk_document
+from app.ingestion.chunker import chunk_document, get_chunker_for
 from app.ingestion.embedding import (
     EmbeddingService,
     SparseEmbeddingService,
@@ -17,6 +18,7 @@ from app.ingestion.embedding import (
 from app.ingestion.parsers import get_parser
 from app.repositories.chunk_repository import ChunkRepository
 from app.repositories.document_repository import DocumentRepository
+from app.core.tracing import maybe_span, set_span_attributes
 from app.services.qdrant_service import QdrantService
 from app.services.s3_service import S3Service
 
@@ -94,12 +96,31 @@ class IngestionService:
                 "PROCESSING",
             )
 
+            parser = get_parser(document.extension)
+            logger.info(
+                "Ingesting document=%s user=%s file=%s parser=%s "
+                "embed_provider=%s dimension=%d",
+                doc_id,
+                user_id,
+                document.stored_filename,
+                getattr(parser, "name", ""),
+                getattr(self.embedding, "last_provider", "") or "",
+                getattr(self.embedding, "dimension", 0) or 0,
+            )
+
             # --------------------------------------------------
             # Download + parse
             # --------------------------------------------------
 
-            parser = get_parser(document.extension)
-            content = self.s3.get_object(document.s3_key)
+            t0 = time.monotonic()
+
+            with maybe_span(
+                "ingestion.download",
+                kind="TOOL",
+                doc_id=doc_id,
+                s3_key=document.s3_key,
+            ):
+                content = self.s3.get_object(document.s3_key)
 
             fd, temp_name = tempfile.mkstemp(
                 suffix=document.extension
@@ -109,31 +130,96 @@ class IngestionService:
 
             temp_path.write_bytes(content)
 
-            parsed = asyncio.run(
-                parser.parse(
-                    file_path=temp_path,
-                    doc_id=doc_id,
-                    version_id=version_id,
-                    user_id=user_id,
-                    filename=document.stored_filename,
-                    mime_type=document.mime_type,
+            with maybe_span(
+                "ingestion.parse",
+                kind="TOOL",
+                doc_id=doc_id,
+                parser=getattr(parser, "name", ""),
+                parser_version=getattr(parser, "version", ""),
+                mime_type=document.mime_type,
+                file_size_bytes=len(content),
+            ):
+                parsed = asyncio.run(
+                    parser.parse(
+                        file_path=temp_path,
+                        doc_id=doc_id,
+                        version_id=version_id,
+                        user_id=user_id,
+                        filename=document.stored_filename,
+                        mime_type=document.mime_type,
+                    )
                 )
+
+            logger.info(
+                "Parsed document=%s (%d bytes) with %s in %.1fs",
+                doc_id,
+                len(content),
+                getattr(parser, "name", ""),
+                time.monotonic() - t0,
             )
 
             # --------------------------------------------------
             # Chunk + embed children
             # --------------------------------------------------
 
-            chunks = chunk_document(parsed)
+            t0 = time.monotonic()
 
-            child_chunks = [
-                chunk
-                for chunk in chunks
-                if chunk.chunk_type == "child"
-            ]
+            with maybe_span(
+                "ingestion.chunk",
+                kind="CHAIN",
+                doc_id=doc_id,
+                chunker=getattr(
+                    get_chunker_for(parsed),
+                    "identifier",
+                    "",
+                ),
+            ):
+                chunks = chunk_document(parsed)
 
-            vectors = self.embedding.embed(
-                [chunk.text for chunk in child_chunks]
+                child_chunks = [
+                    chunk
+                    for chunk in chunks
+                    if chunk.chunk_type == "child"
+                ]
+
+                set_span_attributes(
+                    total_chunks=len(chunks),
+                    parent_count=len(chunks) - len(child_chunks),
+                    child_count=len(child_chunks),
+                )
+
+            logger.info(
+                "Chunked document=%s into %d chunks "
+                "(%d parent, %d child) in %.1fs",
+                doc_id,
+                len(chunks),
+                len(chunks) - len(child_chunks),
+                len(child_chunks),
+                time.monotonic() - t0,
+            )
+
+            with maybe_span(
+                "ingestion.embed.dense",
+                kind="EMBEDDING",
+                doc_id=doc_id,
+                provider=getattr(self.embedding, "last_provider", "") or "",
+                model=getattr(self.embedding, "last_model", "") or "",
+                text_count=len(child_chunks),
+                dimension=getattr(self.embedding, "dimension", 0) or 0,
+            ):
+                t0 = time.monotonic()
+                vectors = self.embedding.embed(
+                    [chunk.text for chunk in child_chunks]
+                )
+
+            logger.info(
+                "Dense-embedded %d child chunks with %s/%s "
+                "(dim=%d) in %.1fs",
+                len(child_chunks),
+                self.embedding.last_provider or "",
+                getattr(self.embedding, "last_model", "") or "",
+                len(vectors[0]) if vectors else 0,
+                time.monotonic() - t0,
             )
 
             # Record which embedding provider produced the
@@ -153,8 +239,27 @@ class IngestionService:
             # produced vectors don't match the child chunks, ingest fails
             # rather than silently storing dense-only points (which would
             # be invisible to hybrid search's sparse arm).
-            sparse_vectors = self.sparse_embedding.embed(
-                [chunk.text for chunk in child_chunks]
+            with maybe_span(
+                "ingestion.embed.sparse",
+                kind="EMBEDDING",
+                doc_id=doc_id,
+                model=getattr(
+                    self.sparse_embedding,
+                    "model_name",
+                    "",
+                ) or "",
+                text_count=len(child_chunks),
+            ):
+                t0 = time.monotonic()
+                sparse_vectors = self.sparse_embedding.embed(
+                    [chunk.text for chunk in child_chunks]
+                )
+
+            logger.info(
+                "Sparse-embedded %d child chunks with %s in %.1fs",
+                len(child_chunks),
+                getattr(self.sparse_embedding, "model_name", "") or "",
+                time.monotonic() - t0,
             )
 
             if len(sparse_vectors) != len(child_chunks):
@@ -168,12 +273,36 @@ class IngestionService:
             # Persist metadata + store vectors in Qdrant
             # --------------------------------------------------
 
-            chunk_repository.create_many(chunks)
+            with maybe_span(
+                "ingestion.persist_db",
+                kind="CHAIN",
+                doc_id=doc_id,
+                chunk_count=len(chunks),
+                parent_count=len(chunks) - len(child_chunks),
+                child_count=len(child_chunks),
+            ):
+                chunk_repository.create_many(chunks)
 
-            self.qdrant.upsert_chunks(
-                chunks=child_chunks,
-                vectors=vectors,
-                sparse_vectors=sparse_vectors,
+            with maybe_span(
+                "ingestion.upsert_qdrant",
+                kind="RETRIEVER",
+                doc_id=doc_id,
+                collection=getattr(self.qdrant, "collection_name", ""),
+                point_count=len(child_chunks),
+                batch_size=getattr(self.qdrant, "upsert_batch_size", 0) or 0,
+            ):
+                t0 = time.monotonic()
+                self.qdrant.upsert_chunks(
+                    chunks=child_chunks,
+                    vectors=vectors,
+                    sparse_vectors=sparse_vectors,
+                )
+
+            logger.info(
+                "Upserted %d points to Qdrant collection %s in %.1fs",
+                len(child_chunks),
+                getattr(self.qdrant, "collection_name", "") or "",
+                time.monotonic() - t0,
             )
 
             document_repository.update_status(
@@ -183,10 +312,13 @@ class IngestionService:
 
             logger.info(
                 "Document %s ingested: "
-                "%d chunks, %d embedded",
+                "%d chunks, %d embedded "
+                "(embedder=%s model=%s)",
                 doc_id,
                 len(chunks),
                 len(child_chunks),
+                self.embedding.last_provider or "",
+                getattr(self.embedding, "last_model", "") or "",
             )
 
             return {

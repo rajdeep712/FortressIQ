@@ -47,10 +47,11 @@ class Settings(BaseSettings):
     # LibreOffice (DOCX -> PDF)
     libreoffice_path: str = "soffice"
 
-    # Embeddings. Primary provider is Gemini (gemini-embedding-2) with strict
-    # free-tier rate limits; sentence-transformers (below) is the fallback.
-    # |gemini|  |sentence-transformer|
-    embedding_provider: str = "gemini"
+    # Embeddings. Primary provider is OpenRouter
+    # (nvidia/llama-nemotron-embed-vl-1b-v2:free, 2048-dim) -- no automatic
+    # runtime fallback. Legacy selections |gemini| and |sentence-transformer|
+    # are still supported via config so the local stack keeps working offline.
+    embedding_provider: str = "openrouter"
     embedding_model: str = "BAAI/bge-base-en-v1.5"
     embedding_dimension: int = 768
     embedding_batch_size: int = 32
@@ -80,6 +81,21 @@ class Settings(BaseSettings):
     # long before probing Gemini again (seconds).
     gemini_fallback_cooldown_seconds: int = 300
 
+    # OpenRouter embeddings (default provider).
+    # nvidia/llama-nemotron-embed-vl-1b-v2 returns 2048-dim vectors, matching
+    # embedding_dimension. The free tier is Cloudflare-fronted and rate-limited,
+    # so the client sends browser-like headers, batch_size 1 with a short sleep
+    # between calls, and retries 429s respecting Retry-After.
+    openrouter_api_key: str = ""
+    openrouter_embedding_model: str = "nvidia/llama-nemotron-embed-vl-1b-v2:free"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_batch_size: int = 1
+    openrouter_sleep_seconds: float = 2.0
+    openrouter_timeout_seconds: int = 120
+    openrouter_retry_max_attempts: int = 3
+    openrouter_http_referer: str = "https://openrouter.ai"
+    openrouter_title: str = "RAG Embeddings"
+
     # Load the embedding model purely from the local HF cache
     # (no hub pings/verification). Requires a one-time download.
     hf_hub_offline: bool = True
@@ -88,6 +104,18 @@ class Settings(BaseSettings):
     chunk_child_max_chars: int = 2000
     chunk_parent_soft_max_chars: int = 7500
     chunk_parent_max_chars: int = 20000
+
+    # PDF chunking: structure-driven (OpenDocumentLoader tree: major
+    # items become parents, kids become 1:1 children) instead of the
+    # window-packing SectionChunker.
+    pdf_chunk_structured: bool = True
+    # Adjacent PDF children shorter than this many chars are folded into
+    # their neighbour (fragments, page-number stubs etc.).
+    pdf_merge_tiny_child_chars: int = 60
+    # Opt-in reading order for PDF siblings via (page, bbox y, bbox x).
+    # Off by default: OpenDocumentLoader emits logical order, and bbox
+    # order can be wrong on multi-column layouts.
+    pdf_sort_siblings_by_bbox: bool = False
 
     # Retrieval: conversation context search + sufficiency routing.
     # These are tunable knobs; validate against a labelled dataset before
@@ -140,6 +168,48 @@ class Settings(BaseSettings):
     worker_max_tries: int = 5
     worker_job_timeout_seconds: int = 3600
     worker_sqs_poll_seconds: int = 10
+
+    # Chat / conversation memory
+    conversation_window: int = 40
+    conversation_top_k: int = 5
+
+    # LLM generation (Groq-hosted, OpenAI-compatible)
+    groq_api_key: str = ""
+    groq_chat_model: str = "openai/gpt-oss-120b"
+    groq_max_tokens: int = 4096
+    groq_temperature: float = 0.1
+    groq_request_timeout_seconds: int = 120
+
+    # RRF fusion over conversation + document hits
+    fusion_k: int = 60
+
+    # Observability: Arize Phoenix (OpenTelemetry / OpenInference).
+    # Enabled by default (per project decision). The whole telemetry path is
+    # fail-open and runs on a background thread (BatchSpanProcessor), so it
+    # never blocks or slows the RAG application; export errors are swallowed.
+    phoenix_enabled: bool = True
+    phoenix_project_name: str = "bring-any-doc-rag"
+    # Phoenix Cloud OTLP traces endpoint. For a local Phoenix it would be
+    # something like http://localhost:6006/v1/traces.
+    phoenix_collector_endpoint: str = "https://app.phoenix.arize.com/v1/traces"
+    # Phoenix Cloud auth: the exporter sends `authorization: Bearer <key>`.
+    # Keep credentials in .env (PHOENIX_API_KEY).
+    phoenix_api_key: str = ""
+    # Legacy header mechanism, parsed into headers only when phoenix_api_key
+    # is empty (e.g. "Authorization=<token>"). Left empty by default.
+    phoenix_client_headers: str = ""
+    # Mount the ARQ job-queue monitoring dashboard at /worq. Read-only by
+    # default; job args (chat message content, user/doc ids) are visible, so
+    # keep the API bound to localhost unless extra auth is added.
+    monitor_enabled: bool = True
+    # Probabilistic per-trace sample rate (1.0 = trace everything). Lower this
+    # under load to drop traces probabilistically and reduce telemetry cost.
+    phoenix_sample_rate: float = 1.0
+    # BatchSpanProcessor safety knobs: short export timeout + bounded queue so
+    # a slow/down Phoenix can never stall a request or balloon memory.
+    phoenix_export_timeout_ms: int = 10000
+    phoenix_max_queue_size: int = 2048
+    phoenix_max_export_batch_size: int = 512
 
     model_config = SettingsConfigDict(
         env_file=".env",
