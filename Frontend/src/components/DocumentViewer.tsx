@@ -10,18 +10,25 @@ import {
   BookOpen,
   Sparkles,
   Layers,
+  Upload,
+  ArrowRight,
   X,
   ChevronDown,
-  Check
+  Check,
+  LogOut
 } from 'lucide-react';
 import { useViewerStore } from '../store/useViewerStore';
+import { logout } from '../api/auth';
+import type { AuthMode } from './AuthModal';
 import { RAGDocument } from '../types';
+import BlurText from './reactbits/BlurText';
 
 interface DocumentViewerProps {
   onOpenUploadModal?: () => void;
+  onOpenAuth?: (mode?: AuthMode) => void;
 }
 
-export const DocumentViewer: React.FC<DocumentViewerProps> = ({ onOpenUploadModal }) => {
+export const DocumentViewer: React.FC<DocumentViewerProps> = ({ onOpenUploadModal, onOpenAuth }) => {
   const {
     activeDocumentId,
     activePage,
@@ -39,16 +46,57 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ onOpenUploadModa
     resetZoom,
     setSearchQueryInDoc,
     setIsOutlineOpen,
-    clearActiveCitation
+    clearActiveCitation,
+    isAuthenticated,
+    isSessionRestoring,
+    isLoadingDocuments,
+    user,
+    setUser,
+    setShowAuthModal
   } = useViewerStore();
 
   const [isDocDropdownOpen, setIsDocDropdownOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [showSearchInput, setShowSearchInput] = useState(false);
   const highlightRef = useRef<HTMLDivElement>(null);
   const documentContainerRef = useRef<HTMLDivElement>(null);
 
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // The backend may already have rotated/cleared the session; clear
+      // local state regardless.
+    }
+    setUser(null);
+    setIsUserMenuOpen(false);
+  };
+
   const currentDoc = documents.find((d) => d.id === activeDocumentId) || null;
   const currentPageData = currentDoc?.pages.find((p) => p.pageNumber === activePage) || null;
+
+  const FEATURES = [
+    {
+      icon: <Upload className="w-7 h-7" />,
+      title: 'Upload any document',
+      desc: 'Drag & drop any PDF, DOCX, or TXT file to instantly index it into the vector store.'
+    },
+    {
+      icon: <FileText className="w-7 h-7" />,
+      title: 'Grounded citations',
+      desc: 'Every answer cites the exact passage it is drawn from — numbered badges you can click.'
+    },
+    {
+      icon: <Sparkles className="w-7 h-7" />,
+      title: 'Jump to the highlighter',
+      desc: 'Click a citation to see the source chunk highlighted right in the document viewer.'
+    },
+    {
+      icon: <Layers className="w-7 h-7" />,
+      title: 'Multi-document search',
+      desc: 'Ask questions across multiple indexed documents at once.'
+    }
+  ];
 
   // Auto-scroll highlight into view when pulseTrigger updates
   useEffect(() => {
@@ -79,37 +127,54 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ onOpenUploadModa
       {/* Header Bar */}
       <header className="px-4 py-3 bg-[#FAF7F2] border-b border-[#E4DCCE] flex items-center justify-between gap-3 shrink-0 z-30 shadow-xs">
         {/* Document Selector Dropdown */}
-        <div className="relative flex items-center gap-2 min-w-0">
+        {isAuthenticated && !isSessionRestoring && (
+          <div className="relative flex items-center gap-2 min-w-0">
           <div className="p-2 rounded-xl bg-[#F97316]/10 text-[#EA580C] shrink-0">
             <FileText className="w-4 h-4" />
           </div>
 
-          <div className="min-w-0">
-            <button
-              id="doc-selector-dropdown-btn"
-              type="button"
-              onClick={() => setIsDocDropdownOpen(!isDocDropdownOpen)}
-              className="flex items-center gap-1.5 text-left text-xs sm:text-sm font-bold text-[#271F17] hover:text-[#EA580C] transition-colors cursor-pointer group"
-            >
-              <span className="truncate max-w-[180px] sm:max-w-[280px]">
-                {currentDoc ? currentDoc.title : 'No Document Selected'}
-              </span>
-              <ChevronDown className="w-3.5 h-3.5 text-[#8C7D6C] group-hover:text-[#EA580C] shrink-0" />
-            </button>
-            {currentDoc && (
-              <div className="text-[11px] text-[#8C7D6C] flex items-center gap-2 mt-0.5">
-                <span className="font-mono">{currentDoc.filename}</span>
-                <span>•</span>
-                <span>{currentDoc.fileSize}</span>
-                <span>•</span>
-                <span className="hidden sm:inline font-medium text-[#D95D0F]">{currentDoc.category}</span>
+          {isLoadingDocuments ? (
+            /* Skeleton for the documents selection line */
+            <div className="min-w-0 space-y-1.5" aria-label="Loading documents">
+              <div className="h-3.5 w-40 rounded bg-[#E6DCCB] animate-pulse" />
+              <div className="h-2 w-28 rounded bg-[#EEE6D9] animate-pulse" />
+            </div>
+          ) : documents.length === 0 ? (
+            /* Signed in, no documents yet */
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-left text-xs sm:text-sm font-bold text-[#8A7B6B]">
+                <span className="truncate max-w-[180px] sm:max-w-[280px]">No Document Selected</span>
               </div>
-            )}
-          </div>
+              <div className="text-[11px] text-[#B3A698]">No documents yet</div>
+            </div>
+          ) : (
+            <>
+            <div className="min-w-0">
+              <button
+                id="doc-selector-dropdown-btn"
+                type="button"
+                onClick={() => setIsDocDropdownOpen(!isDocDropdownOpen)}
+                className="flex items-center gap-1.5 text-left text-xs sm:text-sm font-bold text-[#271F17] hover:text-[#EA580C] transition-colors cursor-pointer group"
+              >
+                <span className="truncate max-w-[180px] sm:max-w-[280px]">
+                  {currentDoc ? currentDoc.title : 'No Document Selected'}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-[#8C7D6C] group-hover:text-[#EA580C] shrink-0" />
+              </button>
+              {currentDoc && (
+                <div className="text-[11px] text-[#8C7D6C] flex items-center gap-2 mt-0.5">
+                  <span className="font-mono">{currentDoc.filename}</span>
+                  <span>•</span>
+                  <span>{currentDoc.fileSize}</span>
+                  <span>•</span>
+                  <span className="hidden sm:inline font-medium text-[#D95D0F]">{currentDoc.category}</span>
+                </div>
+              )}
+            </div>
 
-          {/* Document Picker Dropdown Menu */}
-          <AnimatePresence>
-            {isDocDropdownOpen && (
+            {/* Document Picker Dropdown Menu */}
+            <AnimatePresence>
+              {isDocDropdownOpen && (
               <motion.div
                 initial={{ opacity: 0, y: 6, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -172,8 +237,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ onOpenUploadModa
                 </div>
               </motion.div>
             )}
-          </AnimatePresence>
-        </div>
+            </AnimatePresence>
+            </>
+          )}
+          </div>
+        )}
 
         {/* Center & Right Controls: Page Switcher, Search, Zoom */}
         {currentDoc && (
@@ -274,6 +342,62 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ onOpenUploadModa
             </div>
           </div>
         )}
+
+        {/* Top-right: guest CTA or authenticated user menu */}
+        <div className="ml-auto flex items-center shrink-0">
+          {!isAuthenticated ? (
+            <button
+              type="button"
+              onClick={() => (onOpenAuth ? onOpenAuth() : setShowAuthModal(true))}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#FF7A00] to-[#EA580C] text-white text-xs font-semibold shadow-sm shadow-[#F97316]/30 hover:opacity-95 hover:translate-y-px active:translate-y-0 transition-all cursor-pointer"
+            >
+              Get Started for Free
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          ) : (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsUserMenuOpen((v) => !v)}
+                className="flex items-center gap-2 px-2 py-1 rounded-xl hover:bg-[#FAF7F2] transition-colors cursor-pointer"
+              >
+                <span className="w-7 h-7 rounded-full bg-gradient-to-br from-[#FF7A00] to-[#E65100] text-white text-[11px] font-bold flex items-center justify-center overflow-hidden">
+                  {user?.avatar_url && !user.avatar_url.includes('gravatar.com') ? (
+                    <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    (user?.full_name?.charAt(0) || user?.email?.charAt(0) || '?').toUpperCase()
+                  )}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-[#6C5E4E]" />
+              </button>
+
+              {isUserMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setIsUserMenuOpen(false)} />
+                  <div className="absolute right-0 z-20 mt-2 w-52 bg-white rounded-2xl border border-[#E5DEC3] shadow-xl p-1.5">
+                    <div className="px-3 py-2.5 border-b border-[#EFE9DF] mb-1">
+                      <p className="text-sm font-semibold text-[#221C16] truncate">
+                        {user?.full_name || 'Account'}
+                      </p>
+                      <p className="text-[11px] text-[#7A6D5E] truncate">{user?.email}</p>
+                      <span className="inline-block mt-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-[#FF7A00]/10 text-[#EA580C]">
+                        {user?.is_verified ? 'Verified' : 'Unverified'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-[#3C3227] hover:bg-[#FAF7F2] transition-colors cursor-pointer"
+                    >
+                      <LogOut className="w-4 h-4 text-[#EA580C]" />
+                      Sign out
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </header>
 
       {/* Inline Search Sub-Bar */}
@@ -417,8 +541,133 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ onOpenUploadModa
           className="flex-1 overflow-y-auto overflow-x-auto p-4 sm:p-8 flex justify-center items-start"
           id="pdf-canvas-scroll-container"
         >
-          {/* Empty State: No Document or explore prompt */}
-          {!currentDoc ? (
+          {/* Empty State: restoring skeleton / guest hero / authed docs skeleton / placeholder / document */}
+          {!currentDoc && isSessionRestoring ? (
+            /* Neutral skeleton while the session is being restored — never the
+               guest hero (prevents the split-second marketing flash). */
+            <div className="m-auto flex flex-col items-center justify-center text-center max-w-md p-8">
+              <div className="w-16 h-16 rounded-3xl bg-[#E8DFD2] animate-pulse mb-4" />
+              <div className="h-3.5 w-44 rounded bg-[#E0D7C9] animate-pulse mb-2" />
+              <div className="h-2.5 w-64 rounded bg-[#EAE2D5] animate-pulse" />
+            </div>
+          ) : !currentDoc && isAuthenticated && isLoadingDocuments ? (
+            /* Skeleton for the documents selection stage */
+            <div className="m-auto flex flex-col items-center justify-center text-center max-w-md p-8">
+              <div className="w-16 h-16 rounded-3xl bg-[#F3EBDF] animate-pulse mb-4" />
+              <div className="h-3 w-44 rounded bg-[#E0D7C9] animate-pulse mb-2" />
+              <div className="h-2.5 w-56 rounded bg-[#EAE2D5] animate-pulse" />
+              <p className="mt-4 text-xs text-[#A59787]">Loading your documents...</p>
+            </div>
+          ) : !currentDoc && !isAuthenticated ? (
+            /* Gradient Welcome Panel (guest) */
+            <div className="relative w-full max-w-5xl mx-auto my-2 sm:my-4 rounded-[2rem] overflow-hidden bg-gradient-to-br from-[#FFEDD5] via-[#F6F2EC] to-[#FFD9B3] border border-[#F3DFC4] shadow-[0_30px_60px_-20px_rgba(234,88,12,0.35)]">
+              {/* Ambient color orbs */}
+              <div aria-hidden className="pointer-events-none absolute inset-0">
+                <motion.div
+                  className="absolute -top-24 -left-24 w-72 h-72 rounded-full bg-[#FF7A00]/25 blur-3xl"
+                  animate={{ x: [0, 24, 0], y: [0, 16, 0], scale: [1, 1.15, 1] }}
+                  transition={{ duration: 12, repeat: Infinity, ease: 'easeInOut' }}
+                />
+                <motion.div
+                  className="absolute -bottom-28 -right-20 w-80 h-80 rounded-full bg-[#EA580C]/20 blur-3xl"
+                  animate={{ x: [0, -28, 0], y: [0, -18, 0], scale: [1, 1.2, 1] }}
+                  transition={{ duration: 14, repeat: Infinity, ease: 'easeInOut' }}
+                />
+                <motion.div
+                  className="absolute top-1/3 left-1/2 w-56 h-56 rounded-full bg-[#FDBA74]/30 blur-3xl"
+                  animate={{ x: [0, 18, 0], y: [0, -22, 0], scale: [1, 1.1, 1] }}
+                  transition={{ duration: 16, repeat: Infinity, ease: 'easeInOut' }}
+                />
+              </div>
+
+              {/* Content */}
+              <div className="relative px-6 sm:px-12 py-12 sm:py-16 text-center">
+                {/* Badge */}
+                <motion.div
+                  initial={{ opacity: 0, y: -12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, ease: 'easeOut' }}
+                  className="mb-5 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/80 backdrop-blur text-[#EA580C] text-xs font-semibold border border-[#F5C390] shadow-sm"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Your AI document companion
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#F97316] animate-pulse" />
+                </motion.div>
+
+                {/* Animated headline */}
+                <BlurText
+                  text="Ask your"
+                  className="font-display text-4xl sm:text-6xl font-bold text-[#221C16] text-center"
+                  animateBy="words"
+                  direction="top"
+                  delay={70}
+                  rootMargin="0px"
+                  threshold={0}
+                />
+                <BlurText
+                  text="documents anything."
+                  className="font-display text-4xl sm:text-6xl font-bold bg-gradient-to-r from-[#FF7A00] via-[#F97316] to-[#EA580C] bg-clip-text text-transparent text-center"
+                  animateBy="words"
+                  direction="top"
+                  delay={90}
+                  rootMargin="0px"
+                  threshold={0}
+                />
+
+                {/* Sub-description */}
+                <motion.p
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6, delay: 0.35, ease: 'easeOut' }}
+                  className="mt-6 mx-auto max-w-xl text-sm sm:text-base text-[#6B5B49] leading-relaxed"
+                >
+                  Upload any PDF, DOCX, or TXT and have a natural conversation with it.
+                  Every answer is <span className="font-semibold text-[#3C3227]">grounded in your sources</span> with
+                  clickable citations and in-text highlights you can verify instantly.
+                </motion.p>
+
+                {/* Feature glass cards */}
+                <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+                  {FEATURES.map((f, idx) => (
+                    <motion.div
+                      key={f.title}
+                      initial={{ opacity: 0, y: 24 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.5, delay: 0.45 + idx * 0.12, ease: 'easeOut' }}
+                      className="group relative rounded-2xl bg-white/75 backdrop-blur-md border border-white/70 p-5 text-left shadow-lg shadow-[#EA580C]/5 hover:shadow-xl hover:shadow-[#F97316]/15 hover:-translate-y-1 transition-all duration-300"
+                    >
+                      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#FF7A00] to-[#EA580C] text-white flex items-center justify-center shadow-md shadow-[#F97316]/30 group-hover:scale-110 transition-transform duration-300 mb-4">
+                        {f.icon}
+                      </div>
+                      <h4 className="font-display text-lg font-bold text-[#221C16] mb-1.5">
+                        {f.title}
+                      </h4>
+                      <p className="text-xs text-[#7A6D5E] leading-relaxed">{f.desc}</p>
+                    </motion.div>
+                  ))}
+                </div>
+
+                {/* CTA row */}
+                <motion.div
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6, delay: 0.9, ease: 'easeOut' }}
+                  className="mt-12 flex flex-col sm:flex-row items-center justify-center gap-3"
+                >
+                  <button
+                    type="button"
+                    onClick={() => (onOpenAuth ? onOpenAuth() : setShowAuthModal(true))}
+                    className="group inline-flex items-center gap-2.5 px-8 py-3.5 rounded-2xl bg-gradient-to-r from-[#FF7A00] to-[#EA580C] text-white text-sm font-semibold shadow-lg shadow-[#F97316]/40 hover:shadow-xl hover:shadow-[#F97316]/50 hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer"
+                  >
+                    Get Started for Free
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </button>
+                  <span className="text-xs text-[#8C7D6C]">No credit card required · 2 min setup</span>
+                </motion.div>
+              </div>
+            </div>
+          ) : !currentDoc ? (
+            /* Placeholder for authenticated users with no documents */
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -428,18 +677,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ onOpenUploadModa
                 <BookOpen className="w-8 h-8" />
               </div>
               <h3 className="font-display text-2xl font-bold text-[#221C16] mb-2">
-                Explore Grounded Documents
+                No documents yet
               </h3>
-              <p className="text-xs sm:text-sm text-[#7A6D5E] leading-relaxed mb-6">
-                Ask a research question in the chat or click any inline citation badge like <span className="font-mono font-bold text-[#EA580C] bg-[#F97316]/10 px-1 py-0.5 rounded">[1]</span> to reveal the exact source paper and verified vector bounding box.
+              <p className="text-xs sm:text-sm text-[#7A6D5E] leading-relaxed">
+                Upload a document from the chat to start asking grounded questions with verifiable citations.
               </p>
-              <button
-                type="button"
-                onClick={() => setActiveDocumentId('mistral-7b-v01', 2)}
-                className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-[#FF7A00] to-[#EA580C] text-white font-semibold text-xs shadow-md shadow-[#F97316]/30 hover:opacity-95 transition-all cursor-pointer"
-              >
-                Inspect Mistral 7B Architecture Paper
-              </button>
             </motion.div>
           ) : (
             /* High Fidelity Simulated PDF Document Sheet */

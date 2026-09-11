@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Citation, Message, RAGDocument } from '../types';
-import { INITIAL_CITATIONS, INITIAL_MESSAGES, MOCK_DOCUMENTS } from '../data/mockDocuments';
+import type { AuthUser } from '../api/auth';
+import type { BackendConversation } from '../api/chat';
 
 interface HighlightBox {
   top: number;
@@ -30,6 +31,19 @@ interface ViewerState {
   messages: Message[];
   isGenerating: boolean;
   selectedModel: string;
+
+  // Per-user chat retrieval scope: null means "all documents".
+  selectedDocIds: string[] | null;
+
+  // Bootstrap / loading flags (drive skeletons instead of guest marketing UI)
+  isSessionRestoring: boolean;
+  isLoadingDocuments: boolean;
+  isLoadingMessages: boolean;
+
+  // Conversation history (backend chat)
+  activeChatId: string | null;
+  conversations: BackendConversation[];
+  isLoadingConversations: boolean;
   
   // Viewer presentation state
   zoomLevel: number;
@@ -53,40 +67,67 @@ interface ViewerState {
 
   setSelectedModel: (model: string) => void;
   addMessage: (message: Message) => void;
+  setMessages: (messages: Message[]) => void;
   setIsGenerating: (isGenerating: boolean) => void;
   clearChat: () => void;
 
+  // Conversation history actions
+  setActiveChatId: (chatId: string | null) => void;
+  setConversations: (conversations: BackendConversation[]) => void;
+  setIsLoadingConversations: (v: boolean) => void;
+  appendStreamToken: (messageId: string, token: string) => void;
+  finalizeAssistant: (messageId: string, payload: {
+    content?: string;
+    citations?: Citation[];
+    model?: string;
+    retrievalLatencyMs?: number;
+  }) => void;
+
   uploadDocument: (newDoc: RAGDocument) => void;
+  setDocuments: (documents: RAGDocument[]) => void;
+  setSelectedDocIds: (docIds: string[] | null) => void;
+
+  // Auth state (guest by default; wired to the cookie backend)
+  user: AuthUser | null;
+  isAuthenticated: boolean;
+  showAuthModal: boolean;
+  setUser: (user: AuthUser | null) => void;
+  setAuthenticated: (v: boolean) => void;
+  setShowAuthModal: (v: boolean) => void;
+  setSessionRestoring: (v: boolean) => void;
+  setIsLoadingDocuments: (v: boolean) => void;
+  setIsLoadingMessages: (v: boolean) => void;
 }
 
 export const useViewerStore = create<ViewerState>((set, get) => ({
-  // Default to Mistral 7B Paper on page 2 so user immediately sees interactive highlighted RAG chunk
-  activeDocumentId: 'mistral-7b-v01',
-  activePage: 2,
+  activeDocumentId: null,
+  activePage: 1,
   isViewerOpen: false,
 
-  activeCitationId: 1,
-  activeHighlight: {
-    top: 22,
-    left: 6,
-    width: 88,
-    height: 18,
-    text: 'Sliding Window Attention (SWA) limits the attention span of each token to a local window of size W. In a network with L layers, the theoretical receptive field reaches up to L × W tokens...',
-    chunkTitle: 'Sliding Window Attention & KV Cache Reduction',
-    page: 2,
-    citationId: 1,
-    confidence: 0.96
-  },
+  activeCitationId: null,
+  activeHighlight: null,
   pulseTrigger: 1,
 
-  documents: MOCK_DOCUMENTS,
-  messages: INITIAL_MESSAGES,
+  documents: [],
+  messages: [],
   isGenerating: false,
   selectedModel: 'Mistral Large 2',
+  selectedDocIds: null,
+
+  activeChatId: null,
+  conversations: [],
+  isLoadingConversations: false,
 
   zoomLevel: 100,
   searchQueryInDoc: '',
   isOutlineOpen: false,
+  isSessionRestoring: true,
+  isLoadingDocuments: false,
+  isLoadingMessages: false,
+
+  user: null,
+  isAuthenticated: false,
+  showAuthModal: false,
 
   setActiveDocumentId: (docId, page = 1) => {
     set({
@@ -167,15 +208,46 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
 
   setSelectedModel: (model) => set({ selectedModel: model }),
   addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
+  setMessages: (messages) => set({ messages }),
   setIsGenerating: (isGenerating) => set({ isGenerating }),
 
   clearChat: () => {
     set({
-      messages: INITIAL_MESSAGES,
+      messages: [],
+      activeChatId: null,
       activeCitationId: null,
       activeHighlight: null
     });
   },
+
+  setActiveChatId: (chatId) => set({ activeChatId: chatId }),
+  setConversations: (conversations) => set({ conversations }),
+  setIsLoadingConversations: (isLoadingConversations) => set({ isLoadingConversations }),
+
+  appendStreamToken: (messageId, token) =>
+    set((state) => ({
+      messages: state.messages.map((m) =>
+        m.id === messageId
+          ? { ...m, content: m.content + token }
+          : m
+      )
+    })),
+
+  finalizeAssistant: (messageId, payload) =>
+    set((state) => ({
+      messages: state.messages.map((m) =>
+        m.id === messageId
+          ? {
+              ...m,
+              content: payload.content !== undefined ? payload.content : m.content,
+              citations: payload.citations !== undefined ? payload.citations : m.citations,
+              model: payload.model ?? m.model,
+              retrievalLatencyMs: payload.retrievalLatencyMs ?? m.retrievalLatencyMs
+            }
+          : m
+      ),
+      isGenerating: false
+    })),
 
   uploadDocument: (newDoc) => {
     set((state) => ({
@@ -185,5 +257,27 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       activeCitationId: null,
       activeHighlight: null
     }));
-  }
+  },
+
+  setDocuments: (documents) => set({ documents }),
+
+  setSelectedDocIds: (docIds) => set({ selectedDocIds: docIds }),
+
+  setAuthenticated: (v) => set({ isAuthenticated: v }),
+  setShowAuthModal: (v) => set({ showAuthModal: v }),
+  setUser: (user) =>
+    set((state) => ({
+      user,
+      isAuthenticated: Boolean(user),
+      // Documents are user-scoped; drop them on logout so a fresh sign-in
+      // never sees the previous account's papers.
+      documents: user ? state.documents : [],
+      selectedDocIds: user ? state.selectedDocIds : null,
+      isLoadingDocuments: false,
+      isLoadingMessages: false
+    })),
+
+  setSessionRestoring: (isSessionRestoring) => set({ isSessionRestoring }),
+  setIsLoadingDocuments: (isLoadingDocuments) => set({ isLoadingDocuments }),
+  setIsLoadingMessages: (isLoadingMessages) => set({ isLoadingMessages })
 }));
