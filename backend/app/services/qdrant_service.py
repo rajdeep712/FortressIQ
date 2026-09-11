@@ -77,6 +77,40 @@ class QdrantService:
         vector_size: int,
     ):
 
+        if self.client.collection_exists(
+            self.collection_name
+        ):
+            # If the existing collection was created with a different
+            # vector dimension (e.g. 2048 before switching to BGE 768),
+            # delete it and recreate — Qdrant collection vector size is
+            # fixed at creation and cannot be changed.
+            try:
+                info = self.client.get_collection(
+                    self.collection_name
+                )
+                existing_size = getattr(
+                    info.config.params.vectors,
+                    "size",
+                    None,
+                )
+                if (
+                    existing_size is not None
+                    and existing_size != vector_size
+                ):
+                    logger.warning(
+                        "Collection %s has vector size %d "
+                        "but config requests %d — "
+                        "deleting and recreating.",
+                        self.collection_name,
+                        existing_size,
+                        vector_size,
+                    )
+                    self.client.delete_collection(
+                        self.collection_name
+                    )
+            except Exception:  # noqa: BLE001
+                pass
+
         if not self.client.collection_exists(
             self.collection_name
         ):

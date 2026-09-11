@@ -208,6 +208,37 @@ def test_ingest_completes_and_persists(session_factory, monkeypatch):
         session.close()
 
 
+def test_ingest_reports_pipeline_statuses(
+    session_factory,
+    monkeypatch,
+):
+    persist_document(session_factory)
+
+    recorded = []
+    original = DocumentRepository.update_status
+
+    def recording_update_status(self, doc_id, status):
+        recorded.append(status)
+        return original(self, doc_id, status)
+
+    monkeypatch.setattr(
+        DocumentRepository,
+        "update_status",
+        recording_update_status,
+    )
+
+    svc = make_service(session_factory, monkeypatch)
+    svc.ingest_document("doc1", "u1")
+
+    assert recorded == [
+        "PROCESSING",
+        "PARSED",
+        "CHUNKED",
+        "EMBEDDED",
+        "COMPLETED",
+    ]
+
+
 def test_ingest_skips_completed_documents(
     session_factory,
     monkeypatch,

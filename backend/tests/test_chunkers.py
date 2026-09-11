@@ -13,6 +13,7 @@ from app.ingestion.chunker.json_chunker import JsonChunker
 from app.ingestion.chunker.markdown_chunker import MarkdownChunker
 from app.ingestion.chunker.pptx_chunker import PptxChunker
 from app.ingestion.chunker.section_chunker import SectionChunker
+from app.ingestion.chunker.tokenizer import estimate_tokens
 from app.ingestion.chunker.txt_chunker import TxtChunker
 from app.ingestion.chunker.xlsx_chunker import XlsxChunker
 from app.ingestion.models import (
@@ -260,38 +261,63 @@ def test_section_soft_cap_splits_large_section_into_parts():
     chunks = chunk_document(doc)
     parents, children = parents_children(chunks)
     assert_invariants(chunks)
-    assert len(parents) == 2, "soft cap splits an oversized section"
+    # The default (standardized) chunker token-budgets parents: the
+    # section splits into multiple parts, none above the hard token cap.
+    assert len(parents) >= 2, "token budget splits an oversized section"
     for parent in parents:
-        assert len(parent.text) == 7500
-        assert parent.metadata["part_count"] == 2
-        assert parent.metadata["part"] in (1, 2)
-    assert len({p.chunk_id for p in parents}) == 2
+        assert estimate_tokens(parent.text) <= 1800
+        assert parent.metadata["part_count"] == len(parents)
+        assert "\u2026[truncated]" not in parent.text
+    assert len({p.chunk_id for p in parents}) == len(parents)
 
 
-def test_section_tiny_tail_merges_into_previous_part():
+def test_section_tiny_tail_folds_up_without_breaching_hard_cap():
     doc = document(
         [
-            element("a" * 7500),
-            element("b" * 7500),
+            element("x" * 7500),
+            element("y" * 7500),
             element("c" * 400),
         ],
         "text/html",
         "long.html",
     )
     chunks = chunk_document(doc)
-    parents, _ = parents_children(chunks)
-    assert len(parents) == 2, "tiny trailing part folded into predecessor"
-    texts = sorted(
-        (len(p.text) for p in parents)
-    )
-    assert texts == [7500, 7500 + 2 + 400]
+    parents, children = parents_children(chunks)
+    assert_invariants(chunks)
+    # The tiny 'c' tail merges upward into the preceding parent (it keeps
+    # the merged parent well under the 1800-token hard cap), so no
+    # structurally-forced wafer parent appears.
     assert all(
-        p.metadata["part_count"] == 2
+        estimate_tokens(p.text) <= 1800
         for p in parents
     )
+    assert not any(
+        estimate_tokens(p.text) <= 200
+        for p in parents
+    ), "the tiny tail folds up instead of becoming a wafer parent"
 
 
-def test_single_oversized_element_stays_one_whole_parent():
+def test_section_tiny_tail_merges_when_within_hard_cap():
+    doc = document(
+        [
+            element(
+                "sentence with enough words to fill a couple of "
+                "windows. " * 25
+            ),
+            element("tail words"),
+        ],
+        "text/html",
+        "long.html",
+    )
+    chunker = MarkdownChunker()
+    chunks = chunker.chunk(doc)
+    parents, _ = parents_children(chunks)
+    # The token-budget packer folds the tiny trailing parent in when it
+    # keeps the merged parent under the hard token ceiling.
+    assert len(parents) == 1
+
+
+def test_single_oversized_element_splits_into_token_budgeted_parents():
     doc = document(
         [element("z" * 15000)],
         "application/pdf",
@@ -299,10 +325,17 @@ def test_single_oversized_element_stays_one_whole_parent():
     )
     chunks = chunk_document(doc)
     parents, _ = parents_children(chunks)
-    assert len(parents) == 1
-    assert len(parents[0].text) == 15000
-    assert "part" not in parents[0].metadata
-    assert "\u2026[truncated]" not in parents[0].text
+    assert len(parents) >= 4
+    assert all(
+        estimate_tokens(p.text) <= 1800
+        for p in parents
+    )
+    assert "\u2026[truncated]" not in "".join(
+        p.text for p in parents
+    )
+    assert {p.metadata["part_count"] for p in parents} == {
+        len(parents)
+    }
 
 
 def test_json_soft_cap_produces_smaller_item_boundary_parts():
@@ -382,16 +415,23 @@ def test_pptx_slide_parent_not_soft_split():
 
     doc = document(
         [
-            slide_el("t" * 5000, 1),
-            slide_el("u" * 5000, 1),
+            slide_el("t" * 1200, 1),
+            slide_el("u" * 1200, 1),
         ],
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "deck.pptx",
     )
     chunks = chunk_document(doc)
     parents, _ = parents_children(chunks)
-    assert len(parents) == 1, "slide boundary keeps one parent"
-    assert "part" not in parents[0].metadata
+    # The slide is a seam: every parent belongs to slide 1. A single
+    # 1200-token slide almost fills the 250-token child window 9 times,
+    # which breaches the hard 8-children-per-parent cap, so the slide's
+    # content splits into parts -- still one slide, never coalesced with
+    # another slide.
+    assert len(parents) == 2, "slide content splits on the child cap"
+    assert {p.metadata["slide"] for p in parents} == {1}
+    assert {p.metadata["part_count"] for p in parents} == {2}
+    assert all(p.metadata["part"] in (1, 2) for p in parents)
 
 
 def test_txt_paragraph_runs_grouped_into_one_parent_with_children():
@@ -411,8 +451,10 @@ def test_txt_paragraph_runs_grouped_into_one_parent_with_children():
     assert len(parents) == 1, "small paragraph runs share one parent"
     assert parents[0].metadata["paragraph_runs"] == 2
     assert parents[0].metadata["lines"] == [1, 5]
-    # children never span a paragraph break -> one child per run
-    assert len(children) == 2
+    # the short run is short enough for a single windowed child
+    assert len(children) == 1
+    assert "a line" in children[0].text
+    assert "new para" in children[0].text
     assert_invariants(chunks)
 
 
@@ -764,7 +806,7 @@ def test_json_oversized_array_splits_at_item_boundaries():
             assert k.metadata["parent_chunk_id"] == parent
 
 
-def test_pptx_one_parent_per_slide_unifies_title_and_body():
+def test_pptx_short_slides_coalesce_into_one_parent():
     def slide_el(text, slide, section_path=None, etype="list_item"):
         return element(
             text,
@@ -793,18 +835,24 @@ def test_pptx_one_parent_per_slide_unifies_title_and_body():
     chunks = chunk_document(doc)
     parents, children = parents_children(chunks)
     assert_invariants(chunks)
-    assert len(parents) == 2
-    assert parents[0].section_path == ["Slide One"]
-    assert parents[0].metadata["slide"] == 1
-    assert parents[1].section_path == ["Slide Two"]
+    # Short slides coalesce through `_parent_groups` into a banded
+    # parent instead of each becoming a one-child wafer parent. The
+    # coalesced parent records the slide range it covers.
+    assert len(parents) == 1
+    assert parents[0].metadata["slide_first"] == 1
+    assert parents[0].metadata["slide_last"] == 2
+    assert "Slide One" in parents[0].text
+    assert "Slide Two" in parents[0].text
 
-    # one child per content block: title, bullet a, bullet b (then
-    # title + bullet c) -- not a single size-packed child
+    # Slide content packs into windowed children (feature-scaled): each
+    # short deck becomes a single child covering both slides.
     child_counts = Counter(
         c.parent_chunk_id for c in children
     )
-    assert child_counts[parents[0].chunk_id] == 3
-    assert child_counts[parents[1].chunk_id] == 2
+    assert child_counts[parents[0].chunk_id] == 1
+    slide_one = children[0]
+    assert "Slide One" in slide_one.text
+    assert "bullet a" in slide_one.text
 
 
 def test_pptx_skips_empty_text_blocks_as_children():
@@ -839,10 +887,9 @@ def test_pptx_skips_empty_text_blocks_as_children():
     chunks = chunk_document(doc)
     parents, children = parents_children(chunks)
     assert len(parents) == 1
-    assert len(children) == 2, "empty-text image is not a child"
+    assert len(children) == 1, "empty-text image is not a child"
     assert all(c.text.strip() for c in children)
-    assert children[0].text == "Slide One"
-    assert children[1].text == "bullet a"
+    assert children[0].text == "Slide One\n\nbullet a"
 
 
 def test_pptx_untitled_slide_label():

@@ -26,7 +26,6 @@ openpyxl==3.1.5
 beautifulsoup4
 pymupdf
 
-google-genai
 qdrant-client
 arq
 redis
@@ -57,3 +56,6 @@ opentelemetry-instrumentation-httpx
 
 # Job-queue monitoring: ARQ web dashboard (mounted at /worq in FastAPI)
 worq-dashboard[ui]
+
+# Token-aware chunk sizing (cl100k_base BPE, cached locally after first use)
+tiktoken>=0.9,<1

@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
+import asyncio
+import json
+
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import get_current_user, require_verified_user
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.core.tracing import maybe_span, turn_context
 from app.models.user import User
 from app.repositories.chunk_repository import ChunkRepository
@@ -12,6 +16,7 @@ from app.repositories.document_repository import DocumentRepository
 from app.schemas.document import (
     DocumentUploadResponse,
     DocumentStatusResponse,
+    DocumentSummaryResponse,
     DocumentRetryResponse,
 )
 from app.services.document_service import DocumentService
@@ -122,6 +127,33 @@ async def _enqueue_ingestion(
 
 
 @router.get(
+    "",
+    response_model=list[DocumentSummaryResponse],
+)
+async def list_documents(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    chunk_repository = ChunkRepository(db)
+    return [
+        DocumentSummaryResponse(
+            doc_id=document.doc_id,
+            filename=document.original_filename,
+            status=document.status,
+            chunk_count=chunk_repository.count_by_doc(
+                document.doc_id
+            ),
+            file_size=document.file_size,
+            mime_type=document.mime_type,
+            created_at=document.created_at,
+        )
+        for document in DocumentRepository(db).list_by_user(
+            current_user.user_id
+        )
+    ]
+
+
+@router.get(
     "/{doc_id}",
     response_model=DocumentStatusResponse,
 )
@@ -188,4 +220,113 @@ async def retry_document(
             "Ingestion job enqueued. Track progress via "
             "GET /api/v1/documents/{doc_id}."
         ),
+    )
+
+
+STATUS_POLL_SECONDS = 1.0
+HEARTBEAT_SECONDS = 15.0
+_TERMINAL_STATUSES = ("COMPLETED", "FAILED")
+
+
+def _sse_message(event: str | None, data: str) -> str:
+    """Serialize one SSE frame: named event, or a comment when no name."""
+    if event:
+        return f"event: {event}\ndata: {data}\n\n"
+    return f": {data}\n\n"
+
+
+async def _document_event_stream(
+    doc_id: str,
+    user_id: str,
+    request: Request,
+    session_factory=None,
+):
+    """Yield SSE status frames for a document.
+
+    Emits an initial ``connected`` snapshot, then a ``status`` frame on
+    every status change. The stream ends after a terminal status
+    (``COMPLETED`` / ``FAILED``), on client disconnect, or if the document
+    is no longer accessible. A fresh DB session is used per poll so commits
+    made by the ingestion worker (separate process) are observed.
+    """
+    session_factory = session_factory or SessionLocal
+    last_status: str | None = None
+    heartbeat_elapsed = 0.0
+    first = True
+
+    while True:
+        if not first and await request.is_disconnected():
+            break
+
+        session = session_factory()
+        try:
+            document = DocumentRepository(session).get_by_id(doc_id)
+            if document is None or document.user_id != user_id:
+                break
+            status = document.status
+            changed = status != last_status
+            payload = None
+            if changed:
+                payload = json.dumps(
+                    {
+                        "doc_id": doc_id,
+                        "filename": document.original_filename,
+                        "status": status,
+                        "chunk_count": ChunkRepository(
+                            session
+                        ).count_by_doc(doc_id),
+                    }
+                )
+        finally:
+            session.close()
+
+        if first:
+            yield _sse_message("connected", payload)
+            last_status = status
+            first = False
+            if status in _TERMINAL_STATUSES:
+                break
+        elif changed:
+            yield _sse_message("status", payload)
+            last_status = status
+            if status in _TERMINAL_STATUSES:
+                break
+
+        heartbeat_elapsed += STATUS_POLL_SECONDS
+        if heartbeat_elapsed >= HEARTBEAT_SECONDS:
+            yield _sse_message(None, "ping")
+            heartbeat_elapsed = 0.0
+
+        await asyncio.sleep(STATUS_POLL_SECONDS)
+
+
+@router.get(
+    "/{doc_id}/events",
+)
+async def stream_document_events(
+    doc_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    document = DocumentRepository(db).get_by_id(doc_id)
+
+    if document is None or document.user_id != current_user.user_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    return StreamingResponse(
+        _document_event_stream(
+            doc_id,
+            current_user.user_id,
+            request,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )

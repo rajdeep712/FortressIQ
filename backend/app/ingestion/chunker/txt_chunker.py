@@ -32,14 +32,31 @@ class TxtChunker(BaseChunker):
         parent_max_chars: int | None = None,
         group_target_chars: int | None = None,
     ):
+        # TXT's paragraph-group blocks are sized in characters; when a
+        # caller passes explicit sizes we stay on the legacy character
+        # path. A bare TxtChunker() uses the standardized token budget
+        # and sizes its paragraph groups to ~one soft parent (4-8
+        # children) instead of the old 8000-char target.
+        explicit = (
+            child_max_chars is not None
+            or parent_max_chars is not None
+            or group_target_chars is not None
+        )
         super().__init__(
             child_max_chars=child_max_chars,
             parent_max_chars=parent_max_chars,
+            standard=False if explicit else None,
         )
-        self.group_target_chars = (
-            group_target_chars
-            or self.GROUP_TARGET_CHARS
-        )
+        if group_target_chars is None:
+            if self.standard:
+                group_target_chars = (
+                    self.parent_soft_max_chars
+                )
+            else:
+                group_target_chars = (
+                    self.GROUP_TARGET_CHARS
+                )
+        self.group_target_chars = group_target_chars
 
     def _blocks(
         self,

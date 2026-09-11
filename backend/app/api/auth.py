@@ -31,6 +31,7 @@ from app.services.auth_service import (
     AccountMergeRequiredError,
     AuthService,
     DuplicateEmailError,
+    DuplicateRequestError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
     InvalidGoogleTokenError,
@@ -337,6 +338,19 @@ def refresh_tokens(
         user, access_token, new_refresh_token = _service(db).refresh(
             refresh_token,
             device=_capture_device(request, None),
+        )
+    except DuplicateRequestError as exc:
+        # Another request already rotated this token within the grace
+        # window and set fresh cookies. Treat this as a benign in-flight
+        # duplicate: return success without touching cookies so the
+        # client may simply retry with whatever cookies the browser has.
+        if exc.user_id is not None:
+            user = UserRepository(db).get_by_user_id(exc.user_id)
+            if user is not None:
+                return _auth_response(user)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
         )
     except RefreshTokenError as exc:
         clear_auth_cookies(response)

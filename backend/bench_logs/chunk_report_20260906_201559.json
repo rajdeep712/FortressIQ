@@ -1,0 +1,176 @@
+{
+  "generated_at": "2026-09-06T20:15:59.993945",
+  "files": [
+    {
+      "parent_count": 1,
+      "child_count": 4,
+      "children_per_parent": [
+        {
+          "id": "parent_e72cdcbd3bc34253b438f15a7686af0a",
+          "section": null,
+          "children": 4,
+          "parent_chars": 273,
+          "parent_tokens": 89,
+          "strategy": "csv",
+          "parent_text": "schema: Code | Symbol | Name\n\nCode: AED | Symbol: د.إ | Name: United Arab Emirates d\nCode: AFN | Symbol: ؋ | Name: Afghan afghani\nCode: ALL | Symbol: L | Name: Albanian lek\nCode: AMD | Symbol: AMD | Name: Armenian dram\nCode: ANG | Symbol: ƒ | Name: Netherlands Antillean gu"
+        }
+      ],
+      "children": [
+        {
+          "id": "child_d62a046a95a54e3c935bd1d0b0784e0e",
+          "parent_chunk_id": "parent_e72cdcbd3bc34253b438f15a7686af0a",
+          "chars": 1990,
+          "tokens": 662,
+          "section": null,
+          "child_text": "Code | Symbol | Name\n\nCode: AED | Symbol: د.إ | Name: United Arab Emirates d\n\nCode: AFN | Symbol: ؋ | Name: Afghan afghani\n\nCode: ALL | Symbol: L | Name: Albanian lek\n\nCode: AMD | Symbol: AMD | Name: Armenian dram\n\nCode: ANG | Symbol: ƒ | Name: Netherlands Antillean gu\n\nCode: AOA | Symbol: Kz | Name: Angolan kwanza\n\nCode: ARS | Symbol: $ | Name: Argentine peso\n\nCode: AUD | Symbol: $ | Name: Australian dollar\n\nCode: AWG | Symbol: Afl. | Name: Aruban florin\n\nCode: AZN | Symbol: AZN | Name: Azerbaijani manat\n\nCode: BAM | Symbol: KM | Name: Bosnia and Herzegovina\n\nCode: BBD | Symbol: $ | Name: Barbadian dollar\n\nCode: BDT | Symbol: ৳ | Name: Bangladeshi taka\n\nCode: BGN | Symbol: лв. | Name: Bulgarian lev\n\nCode: BHD | Symbol: .د.ب | Name: Bahraini dinar\n\nCode: BIF | Symbol: Fr | Name: Burundian franc\n\nCode: BMD | Symbol: $ | Name: Bermudian dollar\n\nCode: BND | Symbol: $ | Name: Brunei dollar\n\nCode: BOB | Symbol: Bs. | Name: Bolivian boliviano\n\nCode: BRL | Symbol: R$ | Name: Brazilian real\n\nCode: BSD | Symbol: $ | Name: Bahamian dollar\n\nCode: BTC | Symbol: ฿ | Name: Bitcoin\n\nCode: BTN | Symbol: Nu. | Name: Bhutanese ngultrum\n\nCode: BWP | Symbol: P | Name: Botswana pula\n\nCode: BYR | Symbol: Br | Name: Belarusian ruble (old)'\n\nCode: BYN | Symbol: Br | Name: Belarusian ruble\n\nCode: BZD | Symbol: $ | Name: Belize dollar\n\nCode: CAD | Symbol: $ | Name: Canadian dollar\n\nCode: CDF | Symbol: Fr | Name: Congolese franc\n\nCode: CHF | Symbol: CHF | Name: Swiss franc\n\nCode: CLP | Symbol: $ | Name: Chilean peso\n\nCode: CNY | Symbol: ¥ | Name: Chinese yuan\n\nCode: COP | Symbol: $ | Name: Colombian peso\n\nCode: CRC | Symbol: ₡ | Name: Costa Rican colón\n\nCode: CUC | Symbol: $ | Name: Cuban convertible peso')\n\nCode: CUP | Symbol: $ | Name: Cuban peso\n\nCode: CVE | Symbol: $ | Name: Cape Verdean escudo\n\nCode: CZK | Symbol: Kč | Name: Czech koruna\n\nCode: DJF | Symbol: Fr | Name: Djiboutian franc\n\nCode: DKK | Symbol: DKK | Name: Danish krone\n\nCode: DOP | Symbol: RD$ | Name: Dominican peso"
+        },
+        {
+          "id": "child_8c6de0accd754cb2800dbf9bb1976eeb",
+          "parent_chunk_id": "parent_e72cdcbd3bc34253b438f15a7686af0a",
+          "chars": 1971,
+          "tokens": 683,
+          "section": null,
+          "child_text": "Code: DZD | Symbol: د.ج | Name: Algerian dinar\n\nCode: EGP | Symbol: EGP | Name: Egyptian pound\n\nCode: ERN | Symbol: Nfk | Name: Eritrean nakfa\n\nCode: ETB | Symbol: Br | Name: Ethiopian birr\n\nCode: EUR | Symbol: € | Name: Euro\n\nCode: FJD | Symbol: $ | Name: Fijian dollar\n\nCode: FKP | Symbol: £ | Name: Falkland Islands pound')\n\nCode: GBP | Symbol: £ | Name: Pound sterling\n\nCode: GEL | Symbol: ₾ | Name: Georgian lari\n\nCode: GGP | Symbol: £ | Name: Guernsey pound\n\nCode: GHS | Symbol: ₵ | Name: Ghana cedi\n\nCode: GIP | Symbol: £ | Name: Gibraltar pound\n\nCode: GMD | Symbol: D | Name: Gambian dalasi\n\nCode: GNF | Symbol: Fr | Name: Guinean franc\n\nCode: GTQ | Symbol: Q | Name: Guatemalan quetzal\n\nCode: GYD | Symbol: $ | Name: Guyanese dollar\n\nCode: HKD | Symbol: $ | Name: Hong Kong dollar\n\nCode: HNL | Symbol: L | Name: Honduran lempira\n\nCode: HRK | Symbol: kn | Name: Croatian kuna\n\nCode: HTG | Symbol: G | Name: Haitian gourde\n\nCode: HUF | Symbol: Ft | Name: Hungarian forint\n\nCode: IDR | Symbol: Rp | Name: Indonesian rupiah\n\nCode: ILS | Symbol: ₪ | Name: Israeli new shekel\n\nCode: IMP | Symbol: £ | Name: Manx pound\n\nCode: INR | Symbol: ₹ | Name: Indian rupee\n\nCode: IQD | Symbol: ع.د | Name: Iraqi dinar\n\nCode: IRR | Symbol: ﷼ | Name: Iranian rial\n\nCode: IRT | Symbol: تومان | Name: Iranian toman\n\nCode: ISK | Symbol: kr. | Name: Icelandic króna\n\nCode: JEP | Symbol: £ | Name: Jersey pound\n\nCode: JMD | Symbol: $ | Name: Jamaican dollar\n\nCode: JOD | Symbol: د.ا | Name: Jordanian dinar\n\nCode: JPY | Symbol: ¥ | Name: Japanese yen\n\nCode: KES | Symbol: KSh | Name: Kenyan shilling\n\nCode: KGS | Symbol: сом | Name: Kyrgyzstani som\n\nCode: KHR | Symbol: ៛ | Name: Cambodian riel\n\nCode: KMF | Symbol: Fr | Name: Comorian franc\n\nCode: KPW | Symbol: ₩ | Name: North Korean won\n\nCode: KRW | Symbol: ₩ | Name: South Korean won\n\nCode: KWD | Symbol: د.ك | Name: Kuwaiti dinar\n\nCode: KYD | Symbol: $ | Name: Cayman Islands dollar\n\nCode: KZT | Symbol: ₸ | Name: Kazakhstani tenge"
+        },
+        {
+          "id": "child_518dd52d0f0841a7bd7ddf2f32219de7",
+          "parent_chunk_id": "parent_e72cdcbd3bc34253b438f15a7686af0a",
+          "chars": 1996,
+          "tokens": 716,
+          "section": null,
+          "child_text": "Code: LAK | Symbol: ₭ | Name: Lao kip\n\nCode: LBP | Symbol: ل.ل | Name: Lebanese pound\n\nCode: LKR | Symbol: රු | Name: Sri Lankan rupee\n\nCode: LRD | Symbol: $ | Name: Liberian dollar\n\nCode: LSL | Symbol: L | Name: Lesotho loti\n\nCode: LYD | Symbol: ل.د | Name: Libyan dinar\n\nCode: MAD | Symbol: د.م. | Name: Moroccan dirham\n\nCode: MDL | Symbol: MDL | Name: Moldovan leu\n\nCode: MGA | Symbol: Ar | Name: Malagasy ariary\n\nCode: MKD | Symbol: ден | Name: Macedonian denar\n\nCode: MMK | Symbol: Ks | Name: Burmese kyat\n\nCode: MNT | Symbol: ₮ | Name: Mongolian tögrög\n\nCode: MOP | Symbol: P | Name: Macanese pataca\n\nCode: MRU | Symbol: UM | Name: Mauritanian ouguiya\n\nCode: MUR | Symbol: ₨ | Name: Mauritian rupee\n\nCode: MVR | Symbol: .ރ | Name: Maldivian rufiyaa\n\nCode: MWK | Symbol: MK | Name: Malawian kwacha\n\nCode: MXN | Symbol: $ | Name: Mexican peso\n\nCode: MYR | Symbol: RM | Name: Malaysian ringgit\n\nCode: MZN | Symbol: MT | Name: Mozambican metical\n\nCode: NAD | Symbol: N$ | Name: Namibian dollar\n\nCode: NGN | Symbol: ₦ | Name: Nigerian naira\n\nCode: NIO | Symbol: C$ | Name: Nicaraguan córdoba\n\nCode: NOK | Symbol: kr | Name: Norwegian krone\n\nCode: NPR | Symbol: ₨ | Name: Nepalese rupee\n\nCode: NZD | Symbol: $ | Name: New Zealand dollar\n\nCode: OMR | Symbol: ر.ع. | Name: Omani rial\n\nCode: PAB | Symbol: B/. | Name: Panamanian balboa\n\nCode: PEN | Symbol: S/ | Name: Sol\n\nCode: PGK | Symbol: K | Name: Papua New Guinean kina')\n\nCode: PHP | Symbol: ₱ | Name: Philippine peso\n\nCode: PKR | Symbol: ₨ | Name: Pakistani rupee\n\nCode: PLN | Symbol: zł | Name: Polish złoty\n\nCode: PRB | Symbol: р. | Name: Transnistrian ruble\n\nCode: PYG | Symbol: ₲ | Name: Paraguayan guaraní\n\nCode: QAR | Symbol: ر.ق | Name: Qatari riyal\n\nCode: RON | Symbol: lei | Name: Romanian leu\n\nCode: RSD | Symbol: рсд | Name: Serbian dinar\n\nCode: RUB | Symbol: ₽ | Name: Russian ruble\n\nCode: RWF | Symbol: Fr | Name: Rwandan franc\n\nCode: SAR | Symbol: ر.س | Name: Saudi riyal\n\nCode: SBD | Symbol: $ | Name: Solomon Islands dollar')"
+        },
+        {
+          "id": "child_1387aeef4adb409cac0c7edbc1db0354",
+          "parent_chunk_id": "parent_e72cdcbd3bc34253b438f15a7686af0a",
+          "chars": 1866,
+          "tokens": 645,
+          "section": null,
+          "child_text": "Code: SCR | Symbol: ₨ | Name: Seychellois rupee\n\nCode: SDG | Symbol: ج.س. | Name: Sudanese pound\n\nCode: SEK | Symbol: kr | Name: Swedish krona\n\nCode: SGD | Symbol: $ | Name: Singapore dollar\n\nCode: SHP | Symbol: £ | Name: Saint Helena pound\n\nCode: SLL | Symbol: Le | Name: Sierra Leonean leone\n\nCode: SOS | Symbol: Sh | Name: Somali shilling\n\nCode: SRD | Symbol: $ | Name: Surinamese dollar\n\nCode: SSP | Symbol: £ | Name: South Sudanese pound\n\nCode: STN | Symbol: Db | Name: São Tomé and Príncipe d\n\nCode: SYP | Symbol: ل.س | Name: Syrian pound\n\nCode: SZL | Symbol: L | Name: Swazi lilangeni\n\nCode: THB | Symbol: ฿ | Name: Thai baht\n\nCode: TJS | Symbol: ЅМ | Name: Tajikistani somoni\n\nCode: TMT | Symbol: m | Name: Turkmenistan manat\n\nCode: TND | Symbol: د.ت | Name: Tunisian dinar\n\nCode: TOP | Symbol: T$ | Name: Tongan paʻanga\n\nCode: TRY | Symbol: ₺ | Name: Turkish lira\n\nCode: TTD | Symbol: $ | Name: Trinidad and Tobago doll\n\nCode: TWD | Symbol: NT$ | Name: New Taiwan dollar\n\nCode: TZS | Symbol: Sh | Name: Tanzanian shilling\n\nCode: UAH | Symbol: ₴ | Name: Ukrainian hryvnia\n\nCode: UGX | Symbol: UGX | Name: Ugandan shilling\n\nCode: USD | Symbol: $ | Name: United States (US) dolla\n\nCode: UYU | Symbol: $ | Name: Uruguayan peso\n\nCode: UZS | Symbol: UZS | Name: Uzbekistani som\n\nCode: VEF | Symbol: Bs F | Name: Venezuelan bolívar\n\nCode: VES | Symbol: Bs.S | Name: Bolívar soberano\n\nCode: VND | Symbol: ₫ | Name: Vietnamese đồng\n\nCode: VUV | Symbol: Vt | Name: Vanuatu vatu\n\nCode: WST | Symbol: T | Name: Samoan tālā\n\nCode: XAF | Symbol: CFA | Name: Central African CFA fr\n\nCode: XCD | Symbol: $ | Name: East Caribbean dollar\n\nCode: XOF | Symbol: CFA | Name: West African CFA franc\n\nCode: XPF | Symbol: Fr | Name: CFP franc\n\nCode: YER | Symbol: ﷼ | Name: Yemeni rial\n\nCode: ZAR | Symbol: R | Name: South African rand\n\nCode: ZMW | Symbol: ZK | Name: Zambian kwacha"
+        }
+      ],
+      "parent_token_max": 89,
+      "child_token_max": 716,
+      "child_token_min": 645,
+      "child_token_mean": 676.5,
+      "children_per_parent_max": 4,
+      "children_per_parent_min": 4,
+      "children_per_parent_dist": {
+        "4": 1
+      },
+      "file": "C:\\Users\\rajde\\Documents\\LANGGRAPH\\BRING-ANY-DOC-RAG\\backend\\app\\ingestion\\parsers\\example.csv",
+      "status": "PASS",
+      "mime_type": "text/csv",
+      "strategy": "csv",
+      "elements": 164
+    },
+    {
+      "file": "C:\\Users\\rajde\\Documents\\LANGGRAPH\\BRING-ANY-DOC-RAG\\backend\\app\\ingestion\\parsers\\example.docx",
+      "status": "FAIL",
+      "reason": "chunking: AttributeError: 'DocxChunker' object has no attribute 'chunk_child_max_tokens'"
+    },
+    {
+      "file": "C:\\Users\\rajde\\Documents\\LANGGRAPH\\BRING-ANY-DOC-RAG\\backend\\app\\ingestion\\parsers\\example.html",
+      "status": "FAIL",
+      "reason": "chunking: AttributeError: 'HtmlChunker' object has no attribute 'chunk_child_max_tokens'"
+    },
+    {
+      "file": "C:\\Users\\rajde\\Documents\\LANGGRAPH\\BRING-ANY-DOC-RAG\\backend\\app\\ingestion\\parsers\\example.json",
+      "status": "FAIL",
+      "reason": "chunking: AttributeError: 'JsonChunker' object has no attribute 'chunk_child_max_tokens'"
+    },
+    {
+      "file": "C:\\Users\\rajde\\Documents\\LANGGRAPH\\BRING-ANY-DOC-RAG\\backend\\app\\ingestion\\parsers\\example.md",
+      "status": "FAIL",
+      "reason": "chunking: AttributeError: 'MarkdownChunker' object has no attribute 'chunk_child_max_tokens'"
+    },
+    {
+      "file": "C:\\Users\\rajde\\Documents\\LANGGRAPH\\BRING-ANY-DOC-RAG\\backend\\app\\ingestion\\parsers\\example.pdf",
+      "status": "FAIL",
+      "reason": "chunking: AttributeError: 'PdfChunker' object has no attribute 'chunk_child_max_tokens'"
+    },
+    {
+      "file": "C:\\Users\\rajde\\Documents\\LANGGRAPH\\BRING-ANY-DOC-RAG\\backend\\app\\ingestion\\parsers\\example.pptx",
+      "status": "FAIL",
+      "reason": "chunking: AttributeError: 'PptxChunker' object has no attribute 'chunk_child_max_tokens'"
+    },
+    {
+      "file": "C:\\Users\\rajde\\Documents\\LANGGRAPH\\BRING-ANY-DOC-RAG\\backend\\app\\ingestion\\parsers\\example.txt",
+      "status": "FAIL",
+      "reason": "chunking: AttributeError: 'TxtChunker' object has no attribute 'chunk_child_max_tokens'"
+    },
+    {
+      "parent_count": 1,
+      "child_count": 4,
+      "children_per_parent": [
+        {
+          "id": "parent_a3bd425bfbe341f385ac8b196bda6bf6",
+          "section": [
+            "Sheet1"
+          ],
+          "children": 4,
+          "parent_chars": 718,
+          "parent_tokens": 256,
+          "strategy": "xlsx",
+          "parent_text": "sheet: Sheet1\nschema: 0 | First Name | Last Name | Gender | Country | Age | Date | Id\n\n0: 1 | First Name: Dulce | Last Name: Abril | Gender: Female | Country: United States | Age: 32 | Date: 15/10/2017 | Id: 1562\n0: 2 | First Name: Mara | Last Name: Hashimoto | Gender: Female | Country: Great Britain | Age: 25 | Date: 16/08/2016 | Id: 1582\n0: 3 | First Name: Philip | Last Name: Gent | Gender: Male | Country: France | Age: 36 | Date: 21/05/2015 | Id: 2587\n0: 4 | First Name: Kathleen | Last Name: Hanner | Gender: Female | Country: United States | Age: 25 | Date: 15/10/2017 | Id: 3549\n0: 5 | First Name: Nereida | Last Name: Magwood | Gender: Female | Country: United States | Age: 58 | Date: 16/08/2016 | Id: 2468"
+        }
+      ],
+      "children": [
+        {
+          "id": "child_497e26360c4640448f4988f7349887d9",
+          "parent_chunk_id": "parent_a3bd425bfbe341f385ac8b196bda6bf6",
+          "chars": 1992,
+          "tokens": 721,
+          "section": [
+            "Sheet1"
+          ],
+          "child_text": "0 | First Name | Last Name | Gender | Country | Age | Date | Id\n\n0: 1 | First Name: Dulce | Last Name: Abril | Gender: Female | Country: United States | Age: 32 | Date: 15/10/2017 | Id: 1562\n\n0: 2 | First Name: Mara | Last Name: Hashimoto | Gender: Female | Country: Great Britain | Age: 25 | Date: 16/08/2016 | Id: 1582\n\n0: 3 | First Name: Philip | Last Name: Gent | Gender: Male | Country: France | Age: 36 | Date: 21/05/2015 | Id: 2587\n\n0: 4 | First Name: Kathleen | Last Name: Hanner | Gender: Female | Country: United States | Age: 25 | Date: 15/10/2017 | Id: 3549\n\n0: 5 | First Name: Nereida | Last Name: Magwood | Gender: Female | Country: United States | Age: 58 | Date: 16/08/2016 | Id: 2468\n\n0: 6 | First Name: Gaston | Last Name: Brumm | Gender: Male | Country: United States | Age: 24 | Date: 21/05/2015 | Id: 2554\n\n0: 7 | First Name: Etta | Last Name: Hurn | Gender: Female | Country: Great Britain | Age: 56 | Date: 15/10/2017 | Id: 3598\n\n0: 8 | First Name: Earlean | Last Name: Melgar | Gender: Female | Country: United States | Age: 27 | Date: 16/08/2016 | Id: 2456\n\n0: 9 | First Name: Vincenza | Last Name: Weiland | Gender: Female | Country: United States | Age: 40 | Date: 21/05/2015 | Id: 6548\n\n0: 10 | First Name: Fallon | Last Name: Winward | Gender: Female | Country: Great Britain | Age: 28 | Date: 16/08/2016 | Id: 5486\n\n0: 11 | First Name: Arcelia | Last Name: Bouska | Gender: Female | Country: Great Britain | Age: 39 | Date: 21/05/2015 | Id: 1258\n\n0: 12 | First Name: Franklyn | Last Name: Unknow | Gender: Male | Country: France | Age: 38 | Date: 15/10/2017 | Id: 2579\n\n0: 13 | First Name: Sherron | Last Name: Ascencio | Gender: Female | Country: Great Britain | Age: 32 | Date: 16/08/2016 | Id: 3256\n\n0: 14 | First Name: Marcel | Last Name: Zabriskie | Gender: Male | Country: Great Britain | Age: 26 | Date: 21/05/2015 | Id: 2587\n\n0: 15 | First Name: Kina | Last Name: Hazelton | Gender: Female | Country: Great Britain | Age: 31 | Date: 16/08/2016 | Id: 3259"
+        },
+        {
+          "id": "child_49622a3cd37e48489c447786aeb596e2",
+          "parent_chunk_id": "parent_a3bd425bfbe341f385ac8b196bda6bf6",
+          "chars": 1896,
+          "tokens": 698,
+          "section": [
+            "Sheet1"
+          ],
+          "child_text": "0: 16 | First Name: Shavonne | Last Name: Pia | Gender: Female | Country: France | Age: 24 | Date: 21/05/2015 | Id: 1546\n\n0: 17 | First Name: Shavon | Last Name: Benito | Gender: Female | Country: France | Age: 39 | Date: 15/10/2017 | Id: 3579\n\n0: 18 | First Name: Lauralee | Last Name: Perrine | Gender: Female | Country: Great Britain | Age: 28 | Date: 16/08/2016 | Id: 6597\n\n0: 19 | First Name: Loreta | Last Name: Curren | Gender: Female | Country: France | Age: 26 | Date: 21/05/2015 | Id: 9654\n\n0: 20 | First Name: Teresa | Last Name: Strawn | Gender: Female | Country: France | Age: 46 | Date: 21/05/2015 | Id: 3569\n\n0: 21 | First Name: Belinda | Last Name: Partain | Gender: Female | Country: United States | Age: 37 | Date: 15/10/2017 | Id: 2564\n\n0: 22 | First Name: Holly | Last Name: Eudy | Gender: Female | Country: United States | Age: 52 | Date: 16/08/2016 | Id: 8561\n\n0: 23 | First Name: Many | Last Name: Cuccia | Gender: Female | Country: Great Britain | Age: 46 | Date: 21/05/2015 | Id: 5489\n\n0: 24 | First Name: Libbie | Last Name: Dalby | Gender: Female | Country: France | Age: 42 | Date: 21/05/2015 | Id: 5489\n\n0: 25 | First Name: Lester | Last Name: Prothro | Gender: Male | Country: France | Age: 21 | Date: 15/10/2017 | Id: 6574\n\n0: 26 | First Name: Marvel | Last Name: Hail | Gender: Female | Country: Great Britain | Age: 28 | Date: 16/08/2016 | Id: 5555\n\n0: 27 | First Name: Angelyn | Last Name: Vong | Gender: Female | Country: United States | Age: 29 | Date: 21/05/2015 | Id: 6125\n\n0: 28 | First Name: Francesca | Last Name: Beaudreau | Gender: Female | Country: France | Age: 23 | Date: 15/10/2017 | Id: 5412\n\n0: 29 | First Name: Garth | Last Name: Gangi | Gender: Male | Country: United States | Age: 41 | Date: 16/08/2016 | Id: 3256\n\n0: 30 | First Name: Carla | Last Name: Trumbull | Gender: Female | Country: Great Britain | Age: 28 | Date: 21/05/2015 | Id: 3264"
+        },
+        {
+          "id": "child_735ec9747f724fb494b81b00d529d462",
+          "parent_chunk_id": "parent_a3bd425bfbe341f385ac8b196bda6bf6",
+          "chars": 1914,
+          "tokens": 702,
+          "section": [
+            "Sheet1"
+          ],
+          "child_text": "0: 31 | First Name: Veta | Last Name: Muntz | Gender: Female | Country: Great Britain | Age: 37 | Date: 15/10/2017 | Id: 4569\n\n0: 32 | First Name: Stasia | Last Name: Becker | Gender: Female | Country: Great Britain | Age: 34 | Date: 16/08/2016 | Id: 7521\n\n0: 33 | First Name: Jona | Last Name: Grindle | Gender: Female | Country: Great Britain | Age: 26 | Date: 21/05/2015 | Id: 6458\n\n0: 34 | First Name: Judie | Last Name: Claywell | Gender: Female | Country: France | Age: 35 | Date: 16/08/2016 | Id: 7569\n\n0: 35 | First Name: Dewitt | Last Name: Borger | Gender: Male | Country: United States | Age: 36 | Date: 21/05/2015 | Id: 8514\n\n0: 36 | First Name: Nena | Last Name: Hacker | Gender: Female | Country: United States | Age: 29 | Date: 15/10/2017 | Id: 8563\n\n0: 37 | First Name: Kelsie | Last Name: Wachtel | Gender: Female | Country: France | Age: 27 | Date: 16/08/2016 | Id: 8642\n\n0: 38 | First Name: Sau | Last Name: Pfau | Gender: Female | Country: United States | Age: 25 | Date: 21/05/2015 | Id: 9536\n\n0: 39 | First Name: Shanice | Last Name: Mccrystal | Gender: Female | Country: United States | Age: 36 | Date: 21/05/2015 | Id: 2567\n\n0: 40 | First Name: Chase | Last Name: Karner | Gender: Male | Country: United States | Age: 37 | Date: 15/10/2017 | Id: 2154\n\n0: 41 | First Name: Tommie | Last Name: Underdahl | Gender: Male | Country: United States | Age: 26 | Date: 16/08/2016 | Id: 3265\n\n0: 42 | First Name: Dorcas | Last Name: Darity | Gender: Female | Country: United States | Age: 37 | Date: 21/05/2015 | Id: 8765\n\n0: 43 | First Name: Angel | Last Name: Sanor | Gender: Male | Country: France | Age: 24 | Date: 15/10/2017 | Id: 3259\n\n0: 44 | First Name: Willodean | Last Name: Harn | Gender: Female | Country: United States | Age: 39 | Date: 16/08/2016 | Id: 3567\n\n0: 45 | First Name: Weston | Last Name: Martina | Gender: Male | Country: United States | Age: 26 | Date: 21/05/2015 | Id: 6540"
+        },
+        {
+          "id": "child_99c86f579935438c8652f79262b45c55",
+          "parent_chunk_id": "parent_a3bd425bfbe341f385ac8b196bda6bf6",
+          "chars": 647,
+          "tokens": 236,
+          "section": [
+            "Sheet1"
+          ],
+          "child_text": "0: 46 | First Name: Roma | Last Name: Lafollette | Gender: Female | Country: United States | Age: 34 | Date: 15/10/2017 | Id: 2654\n\n0: 47 | First Name: Felisa | Last Name: Cail | Gender: Female | Country: United States | Age: 28 | Date: 16/08/2016 | Id: 6525\n\n0: 48 | First Name: Demetria | Last Name: Abbey | Gender: Female | Country: United States | Age: 32 | Date: 21/05/2015 | Id: 3265\n\n0: 49 | First Name: Jeromy | Last Name: Danz | Gender: Male | Country: United States | Age: 39 | Date: 15/10/2017 | Id: 3265\n\n0: 50 | First Name: Rasheeda | Last Name: Alkire | Gender: Female | Country: United States | Age: 29 | Date: 16/08/2016 | Id: 6125"
+        }
+      ],
+      "parent_token_max": 256,
+      "child_token_max": 721,
+      "child_token_min": 236,
+      "child_token_mean": 589.2,
+      "children_per_parent_max": 4,
+      "children_per_parent_min": 4,
+      "children_per_parent_dist": {
+        "4": 1
+      },
+      "file": "C:\\Users\\rajde\\Documents\\LANGGRAPH\\BRING-ANY-DOC-RAG\\backend\\app\\ingestion\\parsers\\example.xlsx",
+      "status": "PASS",
+      "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "strategy": "xlsx",
+      "elements": 51
+    }
+  ]
+}

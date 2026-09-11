@@ -114,3 +114,20 @@ def test_document_get_by_id_and_update_status(session):
     assert updated.status == "PROCESSING"
 
     assert dr.update_status("missing", "PROCESSING") is None
+
+
+def test_list_by_user_scopes_and_orders_newest_first(session):
+    dr = DocumentRepository(session)
+    for doc_id in ("doc_oldest", "doc_middle", "doc_newest"):
+        dr.create(make_document(doc_id))
+
+    dr.create(
+        make_document("other_user")
+    )
+    other = dr.get_by_id("other_user")
+    other.user_id = "u2"
+
+    listed = [doc.doc_id for doc in dr.list_by_user("u1")]
+
+    assert listed == ["doc_newest", "doc_middle", "doc_oldest"]
+    assert dr.list_by_user("u2") == [other]

@@ -47,60 +47,36 @@ class Settings(BaseSettings):
     # LibreOffice (DOCX -> PDF)
     libreoffice_path: str = "soffice"
 
-    # Embeddings. Primary provider is OpenRouter
-    # (nvidia/llama-nemotron-embed-vl-1b-v2:free, 2048-dim) -- no automatic
-    # runtime fallback. Legacy selections |gemini| and |sentence-transformer|
-    # are still supported via config so the local stack keeps working offline.
-    embedding_provider: str = "openrouter"
+    # Embeddings: local SentenceTransformer (BAAI/bge-base-en-v1.5, 768-dim).
+    # Remote providers (Gemini, OpenRouter) have been removed; all dense
+    # embeddings run locally via sentence-transformers with batched encoding.
+    embedding_provider: str = "sentence-transformer"
     embedding_model: str = "BAAI/bge-base-en-v1.5"
     embedding_dimension: int = 768
     embedding_batch_size: int = 32
-
-    # Gemini Embedding 2 (free tier). Caps are hard: the client throttles
-    # (sleeps) so these are never exceeded, then backs off on 429.
-    gemini_api_key: str = ""
-    gemini_embedding_model: str = "gemini-embedding-2"
-    # Output dimension of the embedding vectors. Must equal
-    # embedding_dimension so the local fallback stays dimension-compatible.
-    # gemini-embedding-2 supports 128-3072 and auto-normalizes truncated dims.
-    gemini_output_dimensionality: int = 768
-    # Per-request batch size when embedding multiple texts.
-    gemini_embedding_batch_size: int = 16
-    # Free-tier caps (never surpassed; wait until budget frees up).
-    gemini_rate_rpm: int = 100
-    gemini_rate_tpm: int = 30000
-    gemini_rate_rpd: int = 1000
-    # Daily usage is persisted here so worker restarts don't reset RPD.
-    gemini_rate_state_file: str = ".cache/gemini_usage.json"
-    # 429 backoff: wait Retry-After (or 60s) then double up to the max,
-    # giving up after max_attempts consecutive 429s.
-    gemini_retry_base_seconds: int = 60
-    gemini_retry_max_seconds: int = 600
-    gemini_retry_max_attempts: int = 4
-    # After a Gemini outage triggers a fallback, keep using fallback for this
-    # long before probing Gemini again (seconds).
-    gemini_fallback_cooldown_seconds: int = 300
-
-    # OpenRouter embeddings (default provider).
-    # nvidia/llama-nemotron-embed-vl-1b-v2 returns 2048-dim vectors, matching
-    # embedding_dimension. The free tier is Cloudflare-fronted and rate-limited,
-    # so the client sends browser-like headers, batch_size 1 with a short sleep
-    # between calls, and retries 429s respecting Retry-After.
-    openrouter_api_key: str = ""
-    openrouter_embedding_model: str = "nvidia/llama-nemotron-embed-vl-1b-v2:free"
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openrouter_batch_size: int = 1
-    openrouter_sleep_seconds: float = 2.0
-    openrouter_timeout_seconds: int = 120
-    openrouter_retry_max_attempts: int = 3
-    openrouter_http_referer: str = "https://openrouter.ai"
-    openrouter_title: str = "RAG Embeddings"
 
     # Load the embedding model purely from the local HF cache
     # (no hub pings/verification). Requires a one-time download.
     hf_hub_offline: bool = True
 
     # Chunking
+    # Standardized (non-tabular) sizing is token-based:
+    #   * a child chunk is at most `chunk_child_max_tokens` tokens
+    #   * consecutive children within a parent overlap by 200-300 chars,
+    #     aligned to sentence/element seams so the window is coherent
+    #   * a parent chunk holds 4-8 children on average (`chunk_children_min`
+    #     .. `chunk_children_max`) and never exceeds `chunk_parent_max_tokens`
+    #   * chunk sizes are measured with tiktoken cl100k_base (see
+    #     app/ingestion/chunker/tokenizer.py) with a ~4 chars/token fallback
+    # Tabular formats (CSV/XLSX) keep the legacy character caps below.
+    chunk_standard_windowing: bool = True
+    chunk_child_max_tokens: int = 250
+    chunk_parent_max_tokens: int = 1800
+    chunk_overlap_min_chars: int = 200
+    chunk_overlap_max_chars: int = 300
+    chunk_children_min: int = 4
+    chunk_children_max: int = 8
+    # Legacy character caps (CSV/XLSX + explicit-char-override callers).
     chunk_child_max_chars: int = 2000
     chunk_parent_soft_max_chars: int = 7500
     chunk_parent_max_chars: int = 20000

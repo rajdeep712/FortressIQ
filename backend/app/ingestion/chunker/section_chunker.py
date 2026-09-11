@@ -56,6 +56,19 @@ class SectionChunker(BaseChunker):
     def block_key(self, element: ParsedElement):
         return tuple(element.section_path)
 
+    def block_is_seam(
+        self,
+        document: ParsedDocument,
+        block: Block,
+    ) -> bool:
+        # Heading sections are structure: each keeps its own parent.
+        # Only the unsectioned root (blank section_path, or the synthetic
+        # trailing-stub root) is a coalescable content run.
+        return bool(
+            block.key
+            and block.key != ("root",)
+        )
+
     def _blocks(
         self,
         document: ParsedDocument,

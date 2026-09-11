@@ -465,6 +465,108 @@ def test_ensure_collection_creates_dense_and_sparse_config():
     assert dense.size == 768
 
 
+def test_ensure_collection_recreates_when_dimension_changed():
+    calls = []
+
+    class RecreateClient(FakeQdrantClient):
+        def __init__(self):
+            super().__init__()
+            self.registry = {"probe": 2048}
+
+        def collection_exists(self, collection_name):
+            return collection_name in self.registry
+
+        def get_collection(self, collection_name):
+            size = self.registry[collection_name]
+            return type(
+                "_Info",
+                (),
+                {
+                    "payload_schema": dict(self.indexes),
+                    "config": type(
+                        "_Config",
+                        (),
+                        {
+                            "params": type(
+                                "_Params",
+                                (),
+                                {"vectors": type(
+                                    "_VectorParams",
+                                    (),
+                                    {"size": size},
+                                )()},
+                            )()
+                        },
+                    )()
+                },
+            )()
+
+        def delete_collection(self, collection_name):
+            self.registry.pop(collection_name, None)
+            calls.append(("delete", collection_name))
+
+        def create_collection(self, **kwargs):
+            self.registry["probe"] = kwargs["vectors_config"].size
+            calls.append(("create", kwargs))
+
+    svc = make_service(RecreateClient())
+    svc._ensure_collection(768)
+
+    assert [c[0] for c in calls] == ["delete", "create"]
+    assert calls[-1][1]["vectors_config"].size == 768
+    assert svc.client.registry["probe"] == 768
+
+
+def test_ensure_collection_keeps_matching_dimension():
+    calls = []
+
+    class MatchClient(FakeQdrantClient):
+        def __init__(self):
+            super().__init__()
+            self.registry = {"probe": 768}
+
+        def collection_exists(self, collection_name):
+            return collection_name in self.registry
+
+        def get_collection(self, collection_name):
+            return type(
+                "_Info",
+                (),
+                {
+                    "payload_schema": dict(self.indexes),
+                    "config": type(
+                        "_Config",
+                        (),
+                        {
+                            "params": type(
+                                "_Params",
+                                (),
+                                {"vectors": type(
+                                    "_VectorParams",
+                                    (),
+                                    {"size": 768},
+                                )()},
+                            )()
+                        },
+                    )()
+                },
+            )()
+
+        def delete_collection(self, collection_name):
+            calls.append("delete")
+
+        def create_collection(self, **kwargs):
+            calls.append("create")
+
+        def create_vector_name(self, **kwargs):
+            return None
+
+    svc = make_service(MatchClient())
+    svc._ensure_collection(768)
+
+    assert calls == []
+
+
 def _make_query_points_client():
     client = FakeQdrantClient()
     client.query_calls = []

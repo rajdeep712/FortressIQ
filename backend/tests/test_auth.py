@@ -623,6 +623,89 @@ def test_refresh_rotates_via_cookie(client, db_session):
     assert client.post("/api/v1/auth/refresh").status_code == 200
 
 
+def test_refresh_handles_timezone_aware_expiry(client, db_session):
+    """PostgreSQL returns timezone-aware datetimes for
+    ``DateTime(timezone=True)`` columns. Rotation must normalize before
+    comparing to the naive UTC ``now`` — SQLite's naive reads masked this
+    bug in the test suite, but it 500'd every refresh on Postgres."""
+    from app.core.security import generate_refresh_token, hash_refresh_token
+    from app.models.refresh_token import RefreshToken
+    from app.services.auth_service import AuthService
+
+    user = make_verified_user(db_session())
+    db = db_session()
+    raw = generate_refresh_token()
+    aware_now = datetime.now(timezone.utc)
+
+    class StubRefreshRepo:
+        """Repository that hands back a still-valid row whose datetimes are
+        timezone-aware, exactly as psycopg does on Postgres."""
+
+        def __init__(self):
+            self.created = []
+
+        def get_by_token_hash(self, token_hash):
+            if token_hash == hash_refresh_token(raw):
+                return RefreshToken(
+                    token_hash=hash_refresh_token(raw),
+                    session_id="sess-tz",
+                    user_id=user.user_id,
+                    expires_at=aware_now + timedelta(days=30),
+                    created_at=aware_now,
+                )
+            return next(
+                (t for t in self.created if t.token_hash == token_hash),
+                None,
+            )
+
+        def create(self, token):
+            self.created.append(token)
+            return token
+
+        def mark_used(self, token):
+            token.used_at = aware_now
+            return token
+
+        def mark_replaced(self, token, replacement):
+            return token
+
+    result = AuthService(
+        repository=UserRepository(db),
+        refresh_repository=StubRefreshRepo(),
+    ).refresh(raw)
+
+    new_user, access_token, new_refresh = result
+    assert new_user.user_id == user.user_id
+    assert access_token
+    assert new_refresh and new_refresh != raw
+
+
+def test_refresh_duplicate_within_grace_is_success(client, db_session):
+    """Replaying a consumed token within the 15s grace window is a benign
+    in-flight duplicate (e.g. concurrent 401s from StrictMode/double tabs).
+    It must return success WITHOUT clearing the freshly-rotated cookies."""
+    _register(client)
+    old_refresh = client.cookies.get(REFRESH_COOKIE)
+    assert old_refresh
+
+    rotated = client.post("/api/v1/auth/refresh")
+    assert rotated.status_code == 200
+    new_refresh = rotated.cookies.get(REFRESH_COOKIE)
+    assert new_refresh and new_refresh != old_refresh
+
+    # Simulate a stale duplicate request racing behind the rotation above.
+    client.cookies.set(REFRESH_COOKIE, old_refresh)
+    duplicate = client.post("/api/v1/auth/refresh")
+    assert duplicate.status_code == 200
+    assert duplicate.cookies.get(REFRESH_COOKIE) in (None, new_refresh)
+    client.cookies.set(REFRESH_COOKIE, new_refresh)
+
+    # Cookies were NOT cleared: the replacement chain still works and the
+    # access cookie still authenticates.
+    assert client.post("/api/v1/auth/refresh").status_code == 200
+    assert client.get("/api/v1/auth/me").status_code == 200
+
+
 def test_refresh_reuse_beyond_grace_kills_family(
     client, db_session
 ):

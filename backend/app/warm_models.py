@@ -53,6 +53,23 @@ def main() -> int:
 
     done = 0
     try:
+        from app.ingestion.embedding import SentenceTransformerEmbeddingService
+
+        dense = SentenceTransformerEmbeddingService()
+        logger.info(
+            "Warming dense embedding model: %s (%d)",
+            dense.model_name,
+            dense.dimension,
+        )
+        done += 1
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "Failed to warm dense model %s: %s",
+            settings.embedding_model,
+            exc,
+        )
+
+    try:
         from app.ingestion.embedding import SparseEmbeddingService
 
         sparse = SparseEmbeddingService(settings.sparse_model_name)
@@ -85,11 +102,12 @@ def main() -> int:
     if done == 0:
         logger.error(
             "No retrieval models loaded; check installed deps "
-            "(fastembed, flashrank, onnxruntime) and try again."
+            "(sentence-transformers, fastembed, flashrank, onnxruntime) "
+            "and try again."
         )
         return 1
 
-    logger.info("Warmed %d/%d retrieval models.", done, 2)
+    logger.info("Warmed %d/%d retrieval models.", done, 3)
     return 0
 
 

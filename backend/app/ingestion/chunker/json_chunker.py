@@ -1,7 +1,13 @@
 import re
 
-from app.ingestion.chunker.base import BaseChunker
-from app.ingestion.models import ParsedElement
+from app.ingestion.chunker.base import (
+    BaseChunker,
+    Block,
+)
+from app.ingestion.models import (
+    ParsedDocument,
+    ParsedElement,
+)
 
 
 def _top_context(path: str | None) -> str:
@@ -62,6 +68,15 @@ class JsonChunker(BaseChunker):
             "root",
             _top_context(self._path_of(element)),
         )
+
+    def block_is_seam(
+        self,
+        document: ParsedDocument,
+        block: Block,
+    ) -> bool:
+        # One parent per top-level JSON key: keys are structure and never
+        # coalesce with neighbors (oversized keys still split into parts).
+        return True
 
     def block_meta(
         self,

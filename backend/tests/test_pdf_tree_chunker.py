@@ -2,9 +2,10 @@
 
 These cover the OpenDocumentLoader-shaped hierarchy the user's real
 PDFs expose: numbered project items (root ``list item``s) whose kids
-hold nested sub-lists (a/b/c, papers i/ii). Each major item must become
-one parent; each ODL kid must become one child chunk (1:1), even when
-small — no character-window packing.
+hold nested sub-lists (a/b/c, papers i/ii). Major items are content
+blocks: `_parent_groups` DP-coalesces them into banded parents (4-8
+children), with item boundaries surviving as child boundaries. A
+parent keeps coalesced items up to the 1800-token ceiling.
 """
 
 import pytest
@@ -141,16 +142,17 @@ def test_mimics_user_project_list_tree():
     assert_invariants(chunks)
 
     assert len(parents) == 1
-    assert len(children) == 3
+    # Small kids are packed into a single windowed child now, not 1:1.
+    assert len(children) == 1
+    assert children[0].text == "\n\n".join(
+        k.text for k in kids
+    )
 
     assert parents[0].text.startswith(
         "2. Graph Neural Networks"
     )
     assert parents[0].metadata["root_element_id"] == "p2"
 
-    assert [c.text for c in children] == [
-        k.text for k in kids
-    ]
     assert all(
         c.parent_chunk_id == parents[0].chunk_id
         for c in children
@@ -198,16 +200,14 @@ def test_flat_root_leaves_merge_into_one_run_parent():
         PdfChunker().chunk(doc)
     )
     assert len(parents) == 1
-    # 1:1 children, unlike SectionChunker window packing.
+    # Standard windowing packs the short run into a single child.
     assert [c.text for c in children] == [
-        "line one",
-        "line two",
-        "line three",
+        "line one\n\nline two\n\nline three",
     ]
     assert parents[0].metadata["kind"] == "run"
 
 
-def test_numbered_flat_items_get_own_parent_regardless_of_kids():
+def test_numbered_flat_items_coalesce_into_banded_parents():
     doc = document(
         [
             pdf_el("n1", "1. First topic"),
@@ -217,15 +217,18 @@ def test_numbered_flat_items_get_own_parent_regardless_of_kids():
     parents, children = parents_children(
         PdfChunker().chunk(doc)
     )
-    assert len(parents) == 2
-    assert len(children) == 2
-    assert {p.text for p in parents} == {
-        "1. First topic",
-        "2. Second topic",
-    }
-    for parent, child in zip(parents, children):
-        assert child.parent_chunk_id == parent.chunk_id
-        assert parent.text == child.text
+    # Numbered flat items are content blocks, not seams: they coalesce
+    # through `_parent_groups` into banded parents. Two small items form
+    # a single short parent (the DP allows the final parent to fall
+    # short of `children_min`), and standard window packing fuses their
+    # tiny text into one child.
+    assert len(parents) == 1
+    assert len(children) == 1
+    assert children[0].parent_chunk_id == parents[0].chunk_id
+    assert "1. First topic" in parents[0].text
+    assert "2. Second topic" in parents[0].text
+    assert "1. First topic" in children[0].text
+    assert "2. Second topic" in children[0].text
 
 
 def test_top_level_unnumbered_list_item_is_major():
@@ -331,7 +334,11 @@ def test_all_tiny_kids_kept_separate():
     _, children = parents_children(
         PdfChunker().chunk(doc)
     )
-    assert [c.text for c in children] == ["a", "b", "c"]
+    # Tiny kids are windowed into a single small child (still <= token
+    # cap), preserving their join order -- not one child each.
+    assert [c.text for c in children] == [
+        "a\n\nb\n\nc",
+    ]
 
 
 def test_empty_text_kid_skipped():
@@ -413,10 +420,11 @@ def test_bbox_sibling_sort_is_opt_in():
     _, children = parents_children(
         PdfChunker().chunk(doc)
     )
-    # Default: ODL insertion order is preserved (logical order).
-    assert [c.text for c in children] == [
+    # Default: ODL insertion order is preserved (logical order), and
+    # the small siblings pack into one windowed child in that order.
+    assert children[0].text == "\n\n".join(
         k.text for k in kids
-    ]
+    )
 
     sorted_chunker = PdfChunker(
         sort_siblings_by_bbox=True,
@@ -425,9 +433,13 @@ def test_bbox_sibling_sort_is_opt_in():
         sorted_chunker.chunk(doc)
     )
     # Reading order: ascending y.
-    assert sorted_children[0].text == kids[2].text
-    assert sorted_children[1].text == kids[1].text
-    assert sorted_children[2].text == kids[0].text
+    assert sorted_children[0].text == (
+        kids[2].text
+        + "\n\n"
+        + kids[1].text
+        + "\n\n"
+        + kids[0].text
+    )
 
 
 def test_structured_false_restores_window_packing():
@@ -459,8 +471,8 @@ def test_no_elements_produces_no_chunks():
 
 
 def test_nested_descendants_flatten_into_children():
-    # Sub-sub nesting (item -> list -> list item) still yields 1:1
-    # children on the owning major parent.
+    # Sub-sub nesting (item -> list -> list item) still lands on the
+    # owning major parent; window packing yields one merged child.
     root = pdf_el(
         "p1",
         "1. Project",
@@ -491,10 +503,146 @@ def test_nested_descendants_flatten_into_children():
     )
     assert len(parents) == 1
     assert [c.text for c in children] == [
-        "Papers",
-        "i. Something about a method",
+        "Papers\n\ni. Something about a method\n\n"
         "ii. Something about another method",
     ]
     assert all(
         isinstance(c, Chunk) for c in children
     )
+
+
+def _table_tree(row_count: int, table_id="t0"):
+    rows = [
+        pdf_el(
+            f"r{i}",
+            f"Field {i:02d} | A descriptive value for the second column",
+            etype="table_row",
+            parent=table_id,
+        )
+        for i in range(row_count)
+    ]
+    table = pdf_el(
+        table_id,
+        "\n".join(row.text for row in rows),
+        etype="table",
+    )
+    return [table] + rows
+
+
+def test_table_is_its_own_parent_with_one_child_per_row():
+    fillers = [
+        pdf_el(
+            f"f{i}",
+            f"A paragraph {i} preceding the tabular data.",
+        )
+        for i in range(3)
+    ]
+    tail = pdf_el(
+        "f3",
+        "A paragraph following the table.",
+    )
+    table, *rows = _table_tree(5)
+    doc = document(fillers + [table] + rows + [tail])
+
+    chunks = PdfChunker().chunk(doc)
+    parents, children = parents_children(chunks)
+    assert_invariants(chunks)
+
+    table_parents = [
+        p for p in parents
+        if p.metadata.get("kind") == "table"
+    ]
+    run_parents = [
+        p for p in parents
+        if p.metadata.get("kind") != "table"
+    ]
+
+    # The table is a standalone parent, separate from the paragraph
+    # runs on either side of it (those coalesce into two runs of their
+    # own, never absorbing the table).
+    assert len(table_parents) == 1
+    assert len(run_parents) == 2
+
+    table_parent = table_parents[0]
+    assert table_parent.metadata["root_element_type"] == "table"
+
+    row_children = [
+        c for c in children
+        if c.parent_chunk_id == table_parent.chunk_id
+    ]
+    assert [c.text for c in row_children] == [
+        row.text for row in rows
+    ]
+    assert table_parent.text == "\n".join(
+        row.text for row in rows
+    )
+
+
+def test_large_table_bands_into_multiple_parents():
+    rows = _table_tree(30)
+    doc = document(rows)
+
+    chunks = PdfChunker().chunk(doc)
+    parents, children = parents_children(chunks)
+    assert_invariants(chunks)
+
+    table_parents = [
+        p for p in parents
+        if p.metadata.get("kind") == "table"
+    ]
+    assert len(table_parents) >= 2
+    assert all(
+        len([
+            c for c in children
+            if c.parent_chunk_id == p.chunk_id
+        ]) <= PdfChunker().children_max
+        for p in table_parents
+    )
+
+    # Every parent text renders only its own rows.
+    for parent in table_parents:
+        child_texts = [
+            c.text for c in children
+            if c.parent_chunk_id == parent.chunk_id
+        ]
+        assert parent.text == "\n".join(child_texts)
+
+
+def test_table_rows_never_folded_into_neighbours():
+    row_a = pdf_el(
+        "ra",
+        "tiny | a",
+        etype="table_row",
+        parent="t0",
+    )
+    row_b = pdf_el(
+        "rb",
+        "tiny | b",
+        etype="table_row",
+        parent="t0",
+    )
+    table = pdf_el(
+        "t0",
+        f"{row_a.text}\n{row_b.text}",
+        etype="table",
+    )
+    doc = document([table, row_a, row_b])
+
+    parents, children = parents_children(
+        PdfChunker().chunk(doc)
+    )
+
+    table_parents = [
+        p for p in parents
+        if p.metadata.get("kind") == "table"
+    ]
+    assert len(table_parents) == 1
+    row_children = [
+        c for c in children
+        if c.parent_chunk_id == table_parents[0].chunk_id
+    ]
+    # Short rows still stay their own children (no tiny-kid folding).
+    assert [c.text for c in row_children] == [
+        row_a.text,
+        row_b.text,
+    ]

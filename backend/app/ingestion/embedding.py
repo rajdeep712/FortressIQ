@@ -1,17 +1,7 @@
 import logging
 import os
-import time
 
 from app.core.config import settings
-from app.services.gemini_embedding import (
-    EMBEDDER_GEMINI,
-    GeminiEmbeddingService,
-    GeminiUnavailableError,
-)
-from app.services.openrouter_embedding import (
-    EMBEDDER_OPENROUTER,
-    OpenRouterEmbeddingService,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +48,11 @@ class SentenceTransformerEmbeddingService:
         )
 
         self.output_dimension = (
-            self.model.get_sentence_embedding_dimension()
+            getattr(
+                self.model,
+                "get_embedding_dimension",
+                self.model.get_sentence_embedding_dimension,
+            )()
         )
 
         if self.output_dimension != settings.embedding_dimension:
@@ -96,31 +90,20 @@ class SentenceTransformerEmbeddingService:
 
 
 class EmbeddingService:
-    """Facade over the dense embedding engines.
+    """Facade over the dense embedding engine.
 
-    When no ``service`` is injected the constructor evaluates:
-
-    * ``embedding_provider="openrouter"`` (default) → creates
-      ``OpenRouterEmbeddingService``. No runtime fallback: any failure
-      propagates as ``OpenRouterUnavailableError`` so ingestion fails loudly
-      instead of silently storing nothing.
-    * ``embedding_provider="gemini"`` + non-empty ``gemini_api_key``
-      → creates ``GeminiEmbeddingService`` (with rate limiter).
-    * Otherwise → permanent sentence-transformers mode.
-
-    The legacy Gemini path still supports the lazy sentence-transformers
-    fallback + cooldown when the primary is unavailable at runtime.
+    Uses SentenceTransformerEmbeddingService exclusively. When no
+    ``service`` is injected the constructor loads the model specified
+    by ``settings.embedding_model`` (default: BAAI/bge-base-en-v1.5).
 
     The ``service`` injection point is preserved so tests that pass
     ``service=FakeEmbedder`` keep working.
     """
 
     def __init__(self, service=None):
-        self._fallback_until: float = 0.0
+        self._service: SentenceTransformerEmbeddingService | None = None
         self.last_provider: str | None = None
         self.last_model: str | None = None
-        self._gemini: GeminiEmbeddingService | None = None
-        self._openrouter: OpenRouterEmbeddingService | None = None
 
         if service is not None:
             self._service = service
@@ -137,36 +120,7 @@ class EmbeddingService:
             )
             return
 
-        # --- resolve primary engine ----------------------------------------
-        self._service: SentenceTransformerEmbeddingService | None = None
-
-        if settings.embedding_provider.lower() == "openrouter":
-            self._openrouter = OpenRouterEmbeddingService()
-            self.last_provider = EMBEDDER_OPENROUTER
-            self.last_model = self._openrouter.model_name
-            return
-
-        if (
-            settings.embedding_provider.lower() == "gemini"
-            and settings.gemini_api_key
-        ):
-            try:
-                self._gemini = GeminiEmbeddingService()
-                self.last_provider = EMBEDDER_GEMINI
-                self.last_model = (
-                    getattr(self._gemini, "model_name", "")
-                    or settings.gemini_embedding_model
-                )
-            except GeminiUnavailableError as exc:
-                logger.warning(
-                    "Gemini unavailable at startup, "
-                    "defaulting to sentence-transformers: %s",
-                    exc,
-                )
-
-        if self._gemini is None:
-            self._ensure_st()
-            self.last_provider = EMBEDDER_SENTENCE_TRANSFORMER
+        self._ensure_st()
 
     # --- lazy ST init (load once, cache forever) ---------------------------
 
@@ -181,35 +135,10 @@ class EmbeddingService:
         self.last_model = getattr(self._service, "model_name", None)
         return self._service
 
-    # --- cooldown helpers --------------------------------------------------
-
-    def _apply_cooldown(self) -> None:
-        self._fallback_until = (
-            time.time() + settings.gemini_fallback_cooldown_seconds
-        )
-        self.last_provider = EMBEDDER_SENTENCE_TRANSFORMER
-        if self._service is not None:
-            self.last_model = getattr(self._service, "model_name", None)
-        logger.warning(
-            "Gemini unavailable — cooldown %ds → sentence-transformers",
-            settings.gemini_fallback_cooldown_seconds,
-        )
-
-    def _gemini_is_ready(self) -> bool:
-        if self._gemini is None:
-            return False
-        if time.time() < self._fallback_until:
-            return False
-        return True
-
     # --- public API --------------------------------------------------------
 
     @property
     def dimension(self) -> int:
-        if self._openrouter is not None:
-            return self._openrouter.dimension
-        if self._gemini_is_ready():
-            return self._gemini.dimension
         return self._ensure_st().dimension
 
     def embed(
@@ -221,26 +150,9 @@ class EmbeddingService:
             self.last_model = None
             return []
 
-        if self._openrouter is not None:
-            vectors = self._openrouter.embed(texts)
-            self.last_provider = EMBEDDER_OPENROUTER
-            self.last_model = self._openrouter.model_name
-            return vectors
-
-        if self._gemini_is_ready():
-            try:
-                vectors = self._gemini.embed(texts)
-                self.last_provider = EMBEDDER_GEMINI
-                self.last_model = (
-                    getattr(self._gemini, "model_name", "")
-                    or settings.gemini_embedding_model
-                )
-                return vectors
-            except GeminiUnavailableError:
-                self._apply_cooldown()
-
         vectors = self._ensure_st().embed(texts)
         self.last_provider = EMBEDDER_SENTENCE_TRANSFORMER
+        self.last_model = getattr(self._service, "model_name", None)
         return vectors
 
 

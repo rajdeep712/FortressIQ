@@ -24,6 +24,16 @@ class DocumentStatusResponse(BaseModel):
     created_at: datetime
 
 
+class DocumentSummaryResponse(BaseModel):
+    doc_id: str
+    filename: str
+    status: str
+    chunk_count: int
+    file_size: int
+    mime_type: str
+    created_at: datetime
+
+
 class DocumentRetryResponse(BaseModel):
     doc_id: str
     status: str

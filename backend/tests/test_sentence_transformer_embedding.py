@@ -1,15 +1,12 @@
 import numpy as np
 import pytest
 
-import app.ingestion.embedding as embedding_mod
 from app.core.config import settings
 from app.ingestion.embedding import (
-    EMBEDDER_GEMINI,
     EMBEDDER_SENTENCE_TRANSFORMER,
     EmbeddingService,
     SentenceTransformerEmbeddingService,
 )
-from app.services.gemini_embedding import GeminiUnavailableError
 
 
 class FakeModel:
@@ -180,117 +177,3 @@ class TestEmbeddingFacade:
                     model=FakeModel(dimension=42),
                 )
             )
-
-
-class _FakeSTFallbackService:
-    """Stand-in for the lazily-loaded sentence-transformers engine."""
-
-    provider = "sentence-transformer"
-
-    def __init__(self):
-        self.dimension = settings.embedding_dimension
-
-    def embed(self, texts):
-        return [[0.25] * self.dimension for _ in texts]
-
-
-class _FailingGeminiService:
-    provider = EMBEDDER_GEMINI
-
-    def embed(self, texts):
-        raise GeminiUnavailableError("gemini down at call time")
-
-
-def _no_gemini(*args, **kwargs):
-    raise GeminiUnavailableError("no gemini")
-
-
-class TestEmbeddingServiceFallback:
-
-    def test_st_loaded_lazily_when_gemini_unavailable(self, monkeypatch):
-        monkeypatch.setattr(settings, "embedding_provider", "gemini")
-        monkeypatch.setattr(settings, "gemini_api_key", "test-key")
-        monkeypatch.setattr(
-            embedding_mod,
-            "GeminiEmbeddingService",
-            _no_gemini,
-        )
-        monkeypatch.setattr(
-            embedding_mod,
-            "SentenceTransformerEmbeddingService",
-            lambda *a, **k: _FakeSTFallbackService(),
-        )
-
-        service = EmbeddingService()
-
-        assert service.last_provider == EMBEDDER_SENTENCE_TRANSFORMER
-        vectors = service.embed(["hello", "world"])
-        assert len(vectors) == 2
-        assert all(
-            len(v) == settings.embedding_dimension
-            for v in vectors
-        )
-
-    def test_ensure_st_caches_single_instance(self, monkeypatch):
-        monkeypatch.setattr(settings, "embedding_provider", "gemini")
-        monkeypatch.setattr(settings, "gemini_api_key", "test-key")
-        monkeypatch.setattr(
-            embedding_mod,
-            "GeminiEmbeddingService",
-            _no_gemini,
-        )
-        monkeypatch.setattr(
-            embedding_mod,
-            "SentenceTransformerEmbeddingService",
-            lambda *a, **k: _FakeSTFallbackService(),
-        )
-
-        service = EmbeddingService()
-
-        assert service._ensure_st() is service._ensure_st()
-
-    def test_embed_falls_back_to_st_when_gemini_call_fails(self, monkeypatch):
-        monkeypatch.setattr(settings, "embedding_provider", "gemini")
-        monkeypatch.setattr(settings, "gemini_api_key", "test-key")
-        monkeypatch.setattr(
-            embedding_mod,
-            "GeminiEmbeddingService",
-            lambda *a, **k: _FailingGeminiService(),
-        )
-        monkeypatch.setattr(
-            embedding_mod,
-            "SentenceTransformerEmbeddingService",
-            lambda *a, **k: _FakeSTFallbackService(),
-        )
-
-        service = EmbeddingService()
-        assert service.last_provider == EMBEDDER_GEMINI
-
-        vectors = service.embed(["hello"])
-
-        assert service.last_provider == EMBEDDER_SENTENCE_TRANSFORMER
-        assert service._fallback_until > 0
-        assert len(vectors) == 1
-        assert len(vectors[0]) == settings.embedding_dimension
-
-    def test_embed_skips_gemini_during_cooldown(self, monkeypatch):
-        monkeypatch.setattr(settings, "embedding_provider", "gemini")
-        monkeypatch.setattr(settings, "gemini_api_key", "test-key")
-        monkeypatch.setattr(
-            embedding_mod,
-            "GeminiEmbeddingService",
-            lambda *a, **k: _FailingGeminiService(),
-        )
-        monkeypatch.setattr(
-            embedding_mod,
-            "SentenceTransformerEmbeddingService",
-            lambda *a, **k: _FakeSTFallbackService(),
-        )
-
-        service = EmbeddingService()
-        service.embed(["hello"])  # first call triggers the cooldown
-
-        service._gemini = _FailingGeminiService()  # would fail if touched
-        service.embed(["again"])  # cooldown active -> straight to ST
-
-        assert service.last_provider == EMBEDDER_SENTENCE_TRANSFORMER

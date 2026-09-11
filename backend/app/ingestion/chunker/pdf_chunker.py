@@ -1,8 +1,10 @@
 import re
+from uuid import uuid4
 
 from app.core.config import settings
 from app.ingestion.chunker.base import (
     Block,
+    Chunk,
 )
 from app.ingestion.chunker.section_chunker import (
     SectionChunker,
@@ -154,11 +156,41 @@ class PdfChunker(SectionChunker):
 
         return blocks
 
+    def block_is_seam(
+        self,
+        document: ParsedDocument,
+        block: Block,
+    ) -> bool:
+        # Unstructured PDF keeps heading-section structure. Structured
+        # PDF exposes every major item as its own content block, so
+        # those blocks coalesce through `_parent_groups` into banded
+        # parents (4-8 children) instead of each becoming a one-child
+        # wafer parent. Item boundaries survive as child boundaries.
+        # Tables are always hard seams: each table is its own parent,
+        # never coalesced with neighbouring runs.
+        if (
+            block.key
+            and block.key[0] == "table"
+        ):
+            return True
+
+        if not self.structured:
+            return bool(
+                block.key
+                and block.key != ("root",)
+            )
+        return False
+
     def _is_major(
         self,
         element: ParsedElement,
         kids: list[ParsedElement],
     ) -> bool:
+
+        if (
+            element.element_type == "table"
+        ):
+            return True
 
         if kids:
             return True
@@ -209,22 +241,72 @@ class PdfChunker(SectionChunker):
                 key=self._reading_position,
             )
 
-        elements = self._fold_tiny_kids(
-            kids,
+        is_table = (
+            root.element_type == "table"
         )
 
+        # Table rows are meaningful children regardless of length,
+        # so do not fold short rows into their neighbours.
+        if is_table:
+            elements = kids
+        else:
+            elements = self._fold_tiny_kids(
+                kids,
+            )
+
+        meta = {
+            "kind": (
+                "table"
+                if is_table
+                else "major"
+            ),
+            "root_element_id": (
+                root.element_id
+            ),
+            "root_element_type": (
+                root.element_type
+            ),
+        }
+
+        if is_table:
+
+            root_metadata = (
+                root.metadata or {}
+            )
+
+            if (
+                "number of rows"
+                in root_metadata
+            ):
+
+                meta["table_rows"] = (
+                    root_metadata[
+                        "number of rows"
+                    ]
+                )
+
+            if (
+                "number of columns"
+                in root_metadata
+            ):
+
+                meta["table_columns"] = (
+                    root_metadata[
+                        "number of columns"
+                    ]
+                )
+
         return Block(
-            key=("major", root),
+            key=(
+                ("table", root)
+                if is_table
+                else (
+                    "major",
+                    root,
+                )
+            ),
             elements=elements,
-            meta={
-                "kind": "major",
-                "root_element_id": (
-                    root.element_id
-                ),
-                "root_element_type": (
-                    root.element_type
-                ),
-            },
+            meta=meta,
         )
 
     def _make_run_block(
@@ -410,6 +492,19 @@ class PdfChunker(SectionChunker):
 
         if (
             block.key
+            and block.key[0] == "table"
+        ):
+            # The table element's own text already renders every row,
+            # so render only the part rows (keeps split parts of a
+            # very large table from duplicating the whole table).
+            return "\n".join(
+                element.text
+                for element in part_elements
+                if element.text
+            )
+
+        if (
+            block.key
             and block.key[0] == "major"
         ):
 
@@ -441,6 +536,164 @@ class PdfChunker(SectionChunker):
             element.text
             for element in part_elements
         )
+
+    # ---------------------------------------------------------------
+    # Tables: a table is its own parent; its rows are the children
+    # (one child chunk per row). Oversized tables band into multiple
+    # parents holding at most ``children_max`` rows each.
+    # ---------------------------------------------------------------
+
+    def _split_parts(
+        self,
+        document: ParsedDocument,
+        block: Block,
+    ) -> list[list[ParsedElement]]:
+
+        if (
+            block.key
+            and block.key[0] == "table"
+        ):
+            return self._split_table_rows(
+                document,
+                block,
+            )
+
+        return super()._split_parts(
+            document=document,
+            block=block,
+        )
+
+    def _split_table_rows(
+        self,
+        document: ParsedDocument,
+        block: Block,
+    ) -> list[list[ParsedElement]]:
+
+        rows = [
+            element
+            for element in block.elements
+            if element.text.strip()
+        ]
+
+        if not rows:
+            return [[]]
+
+        if len(rows) <= self.children_max:
+            return [rows]
+
+        return [
+            rows[offset:offset + self.children_max]
+            for offset in range(
+                0,
+                len(rows),
+                self.children_max,
+            )
+        ]
+
+    def _make_children(
+        self,
+        document: ParsedDocument,
+        elements: list[ParsedElement],
+        parent_chunk_id: str,
+        section_path: list[str],
+        start_index: int,
+        block: Block,
+    ) -> list[Chunk]:
+
+        if (
+            block.key
+            and block.key[0] == "table"
+        ):
+            return self._make_table_row_children(
+                document=document,
+                elements=elements,
+                parent_chunk_id=parent_chunk_id,
+                section_path=section_path,
+                start_index=start_index,
+                block=block,
+            )
+
+        return super()._make_children(
+            document=document,
+            elements=elements,
+            parent_chunk_id=parent_chunk_id,
+            section_path=section_path,
+            start_index=start_index,
+            block=block,
+        )
+
+    def _make_table_row_children(
+        self,
+        document: ParsedDocument,
+        elements: list[ParsedElement],
+        parent_chunk_id: str,
+        section_path: list[str],
+        start_index: int,
+        block: Block,
+    ) -> list[Chunk]:
+
+        chunks: list[Chunk] = []
+        index = start_index
+
+        for element in elements:
+
+            if not element.text.strip():
+                continue
+
+            metadata = self._record_metadata(
+                document,
+                chunk_type="child",
+                chunk_index=index,
+                parent_chunk_id=parent_chunk_id,
+                section_path=section_path,
+                block=block,
+                group_elements=[element],
+                extra=self.child_metadata(
+                    document,
+                    [element],
+                ),
+            )
+
+            chunks.append(
+                Chunk(
+                    chunk_id=(
+                        "child_"
+                        + uuid4().hex
+                    ),
+
+                    parent_chunk_id=(
+                        parent_chunk_id
+                    ),
+
+                    chunk_type="child",
+
+                    text=element.text,
+
+                    chunk_index=index,
+
+                    doc_id=document.doc_id,
+
+                    version_id=(
+                        document.version_id
+                    ),
+
+                    user_id=document.user_id,
+
+                    section_path=list(
+                        section_path
+                    ),
+
+                    locations=list(
+                        element.locations
+                    ),
+
+                    metadata=metadata,
+                )
+            )
+
+            index += 1
+
+        return chunks
 
     # ---------------------------------------------------------------
     # Children: one child chunk per ODL kid / run member

@@ -36,6 +36,21 @@ class DocumentRepository:
             statement
         ).scalar_one_or_none()
 
+    def list_by_user(
+        self,
+        user_id: str,
+    ) -> list[Document]:
+
+        statement = (
+            select(Document)
+            .where(Document.user_id == user_id)
+            .order_by(Document.id.desc())
+        )
+
+        return list(
+            self.db.execute(statement).scalars().all()
+        )
+
     def update_status(
         self,
         doc_id: str,

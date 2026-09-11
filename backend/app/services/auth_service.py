@@ -74,7 +74,9 @@ class RefreshTokenError(Exception):
 
 
 class DuplicateRequestError(RefreshTokenError):
-    pass
+    def __init__(self, message: str, user_id: str | None = None):
+        super().__init__(message)
+        self.user_id = user_id
 
 
 class AccountMergeRequiredError(Exception):
@@ -504,7 +506,8 @@ class AuthService:
             ).total_seconds()
             if elapsed <= REUSE_GRACE_SECONDS:
                 raise DuplicateRequestError(
-                    "Duplicate refresh request detected."
+                    "Duplicate refresh request detected.",
+                    user_id=row.user_id,
                 )
             # Beyond the grace window: stolen/replayed token. Revoke the
             # entire session family and reject.
@@ -521,7 +524,10 @@ class AuthService:
                 "Invalid or expired refresh token."
             )
 
-        if row.expires_at <= now:
+        # PostgreSQL returns timezone-aware datetimes for
+        # DateTime(timezone=True), so normalize before comparing to the
+        # naive UTC `now` (SQLite returns naive natively — no-op there).
+        if row.expires_at.replace(tzinfo=None) <= now:
             raise RefreshTokenError(
                 "Invalid or expired refresh token."
             )

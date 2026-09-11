@@ -158,6 +158,11 @@ class IngestionService:
                 time.monotonic() - t0,
             )
 
+            document_repository.update_status(
+                doc_id,
+                "PARSED",
+            )
+
             # --------------------------------------------------
             # Chunk + embed children
             # --------------------------------------------------
@@ -196,6 +201,11 @@ class IngestionService:
                 len(chunks) - len(child_chunks),
                 len(child_chunks),
                 time.monotonic() - t0,
+            )
+
+            document_repository.update_status(
+                doc_id,
+                "CHUNKED",
             )
 
             with maybe_span(
@@ -268,6 +278,11 @@ class IngestionService:
                     f"{len(sparse_vectors)} vectors for "
                     f"{len(child_chunks)} child chunks; aborting ingest"
                 )
+
+            document_repository.update_status(
+                doc_id,
+                "EMBEDDED",
+            )
 
             # --------------------------------------------------
             # Persist metadata + store vectors in Qdrant

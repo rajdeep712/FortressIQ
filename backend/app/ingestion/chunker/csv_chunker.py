@@ -20,6 +20,21 @@ class CsvChunker(BaseChunker):
 
     TABLE_KEY = ("table",)
 
+    def __init__(
+        self,
+        child_max_chars: int | None = None,
+        parent_max_chars: int | None = None,
+        parent_soft_max_chars: int | None = None,
+    ):
+        # Tabular formats keep the legacy character-based sizing: row
+        # groups, no window overlap, no token cap.
+        super().__init__(
+            standard=False,
+            child_max_chars=child_max_chars,
+            parent_max_chars=parent_max_chars,
+            parent_soft_max_chars=parent_soft_max_chars,
+        )
+
     def block_key(self, element: ParsedElement):
         return self.TABLE_KEY
 
